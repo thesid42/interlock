@@ -77,6 +77,7 @@ class ClickHouseAnalytics:
                     host=self.settings.clickhouse_host, port=self.settings.clickhouse_port,
                     username=self.settings.clickhouse_username, password=self.settings.clickhouse_password,
                     secure=self.settings.clickhouse_secure, database="default",
+                    ca_cert=self.settings.clickhouse_ca_cert or None,
                     connect_timeout=5, send_receive_timeout=15, autogenerate_session_id=False,
                 )
             except ImportError:

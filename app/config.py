@@ -56,6 +56,7 @@ class Settings:
     clickhouse_password: str = ""
     clickhouse_database: str = "interlock"
     clickhouse_secure: bool = True
+    clickhouse_ca_cert: str = "certifi"
     guild_base_url: str = "https://api.guild.ai/v1"
     guild_api_key: str = ""
     guild_trigger_api_key: str = ""
@@ -112,6 +113,7 @@ class Settings:
             clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             clickhouse_database=os.getenv("CLICKHOUSE_DATABASE", "interlock"),
             clickhouse_secure=_boolean("CLICKHOUSE_SECURE", True),
+            clickhouse_ca_cert=os.getenv("CLICKHOUSE_CA_CERT", "certifi").strip(),
             guild_base_url=os.getenv("GUILD_BASE_URL", cls.guild_base_url),
             guild_api_key=os.getenv("GUILD_API_KEY", ""),
             guild_trigger_api_key=os.getenv("GUILD_TRIGGER_API_KEY", ""),
