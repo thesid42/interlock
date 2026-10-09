@@ -16,7 +16,7 @@ function proofState(key: string, integration?: Integration): string {
   if (!integration) return 'unavailable';
   if (key === 'akash') return integration.inference_verified ? 'inference verified' : integration.models_discovered ? 'models discovered' : 'inference unverified';
   if (key === 'guild') return integration.authentication_verified ? 'authentication verified' : 'authentication unverified';
-  if (key === 'sandbox') return integration.verified ? 'runtime verified' : integration.setup_verified ? 'setup verified, runtime unverified' : 'runtime unverified';
+  if (key === 'sandbox') return !integration.configured ? 'not configured' : integration.verified ? 'runtime verified' : integration.setup_verified ? 'setup verified, runtime unverified' : 'setup check required';
   return integration.verified ? 'connection verified' : 'connection unverified';
 }
 
@@ -91,7 +91,7 @@ export default function ConnectionsView({ health, onRefresh }: { health: Health 
         {(key === 'guild' || key === 'sandbox') && integration && <dl className="detail-grid connection-evidence">
           {key === 'guild' && <Field name="API authentication" value={integration.authentication_verified ? 'Verified' : integration.key_configured ? 'Key present; not verified' : 'Key missing'} />}
           {key === 'guild' && <Field name="Required permissions" value={integration.permissions_verified ? 'Verified' : missingPermissions?.length ? missingPermissions.join(', ') : 'Not verified'} />}
-          {key === 'sandbox' && <Field name="Investigator setup" value={integration.setup_verified ? 'Verified' : 'Not verified'} />}
+          {key === 'sandbox' && <Field name="Investigator setup" value={integration.setup_verified ? 'Verified' : integration.configured ? 'Check required' : 'Not configured'} />}
           {key === 'sandbox' && <Field name="Isolated execution" value={integration.verified ? 'Runtime metadata verified' : 'Not verified'} />}
           {key === 'sandbox' && <Field name="Evidence export" value={integration.evidence_export_enabled ? 'Enabled for bounded public evidence' : 'Disabled'} />}
           {missing?.length ? <Field name="Missing settings" value={missing.map((setting) => <div key={setting}><code>{setting}</code></div>)} /> : null}

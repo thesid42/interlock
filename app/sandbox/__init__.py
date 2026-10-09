@@ -95,9 +95,11 @@ class IncidentSandbox:
         self._runtime_verified = False
         self._workspace_id = None
         self._environment_id = None
-        self._detail = "Configure and publish the dedicated Guild Goose investigator"
+        self._detail = ("Configured; run the setup check to verify the pinned Guild investigator"
+                        if settings.sandbox_enabled and not self._missing_configuration()
+                        else "Configure and publish the dedicated Guild Goose investigator")
 
-    def readiness(self) -> dict:
+    def _missing_configuration(self) -> list[str]:
         required = {"GUILD_API_KEY": self.guild.api_key,
                     "GUILD_TRIGGER_API_KEY": self.guild.trigger_api_key,
                     "GUILD_TRIGGER_ID": self.guild.trigger_id,
@@ -107,7 +109,10 @@ class IncidentSandbox:
                     "GUILD_SANDBOX_ENVIRONMENT": self.settings.guild_sandbox_environment,
                     "GUILD_SANDBOX_ENVIRONMENT_ID": getattr(self.settings, "guild_sandbox_environment_id", ""),
                     "GUILD_SANDBOX_IMAGE_ID": self.settings.guild_sandbox_image_id}
-        missing = [name for name, value in required.items() if not value]
+        return [name for name, value in required.items() if not value]
+
+    def readiness(self) -> dict:
+        missing = self._missing_configuration()
         configured = bool(self.settings.sandbox_enabled and not missing)
         authentication = self.guild.readiness()
         return {"provider": "guild_sandbox", "configured": configured,
@@ -245,6 +250,7 @@ class IncidentSandbox:
     def poll(self, session_id: str, from_id: str | None = None, *,
              expected_snapshot_hash: str | None = None, incident_id: str | None = None) -> dict:
         base = {"session_id": session_id, "result": None, "error": None,
+                "poll_warning": None, "poll_retryable": False,
                 "isolation_verified": False, "replay_execution_verified": False,
                 "session_runtime_verified": False, "root_task_verified": False,
                 "root_runtime_binding_verified": False,
@@ -259,7 +265,8 @@ class IncidentSandbox:
             runtimes = self.guild.fetch_runtimes(session_id)
             tasks = self.guild.fetch_tasks(session_id)
         except IntegrationError:
-            return {**base, "state": "pending", "error": "Guild evidence polling failed; existing session was not restarted"}
+            return {**base, "state": "pending", "error": None, "poll_retryable": True,
+                    "poll_warning": "Guild metadata polling is temporarily delayed; the existing session is preserved and will be checked again"}
         base.update(runtimes=runtimes, tasks=tasks)
         if (session.get("id") != session_id or session.get("workspace_id") != self._workspace_id
                 or session.get("interrupted_at")):
@@ -305,7 +312,8 @@ class IncidentSandbox:
             else:
                 page = self.guild.poll(session_id, from_id)
         except IntegrationError:
-            return {**base, "state": "pending", "error": "Guild event polling failed; existing session was not restarted"}
+            return {**base, "state": "pending", "error": None, "poll_retryable": True,
+                    "poll_warning": "Guild event polling is temporarily delayed; the existing session is preserved and will be checked again"}
         base.update(next_cursor=page["next_cursor"], has_more=page["has_more"],
                     events=[{"id": event.get("id"), "type": event.get("type"),
                              "task_id": event.get("task_id")} for event in page.get("events", [])])

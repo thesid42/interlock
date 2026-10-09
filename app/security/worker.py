@@ -152,11 +152,16 @@ class InvestigationWorker:
                         if result.get("isolation_verified") is True and result.get("remote_terminal_verified") is True:
                             result["state"] = "reported"
                             result["error"] = None
-                result = {**previous, **result, "poll_failures": 0, "next_poll_at": later(10)}
+                retryable = result.get("poll_retryable") is True
+                failures = previous.get("poll_failures", 0) + 1 if retryable else 0
+                result = {**previous, **result, "poll_failures": failures,
+                          "next_poll_at": later(min(60, 10 * max(1, failures)) if retryable else 10)}
             except Exception as exc:
                 failures = previous.get("poll_failures", 0) + 1
                 result = {**previous, "state": "pending", "poll_failures": failures,
-                          "next_poll_at": later(min(60, 10 * failures)), "error": f"Read-only hosted polling failed: {type(exc).__name__}"}
+                          "next_poll_at": later(min(60, 10 * failures)), "error": None,
+                          "poll_retryable": True,
+                          "poll_warning": f"Read-only Guild polling is temporarily delayed ({type(exc).__name__}); the existing session is preserved"}
             if result.get("state") == "completed" and result.get("isolation_verified") is not True:
                 result["state"] = "pending"
                 result["error"] = "Awaiting independent session-locked runtime attestation"
@@ -178,6 +183,7 @@ class InvestigationWorker:
             state = "waiting_sandbox" if result["state"] == "pending" else "review_required" if result["state"] == "reported" else "reconciliation_required" if result["state"] == "deadline_expired" else result["state"]
             qwen = investigation.get("qwen")
             guild = {"state": result["state"], "session_id": previous["session_id"], "advisory_only": True,
+                     "poll_warning": result.get("poll_warning"),
                      "isolation_verified": result.get("isolation_verified", False),
                      "replay_execution_verified": result.get("replay_execution_verified", False), "runtimes": result.get("runtimes", []),
                      "replies": [{"state": "reported" if state == "review_required" else "validated", "advisory_only": True, "result": result.get("result")}] if state in {"completed", "review_required"} else []}

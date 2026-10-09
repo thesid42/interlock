@@ -215,6 +215,13 @@ not followed. Keep intervals at least 60 seconds. Review brief citations and run
 status, then use the labeled controlled incident to inspect containment/RCA flow.
 The fixture is recorded, not an attempt to attack an external agent.
 
+For the fastest containment demo, click **Run blocked-agent demo** in Operations.
+Interlock creates a labeled recorded agent whose synthetic vendor input proposes
+uploading an evidence bundle to an unauthorized external destination. The policy
+boundary denies the capability before dispatch, contains the agent, quarantines
+the implicated evidence and opens a frozen incident dossier. No external request
+or real data transfer is performed.
+
 Resolve an incident with a reason, then explicitly resume the agent. Resolution
 does not automatically unquarantine source memory or demonstrate safe recovery.
 The current detector is deliberately narrow; authorization is the primary control.
