@@ -1,0 +1,4 @@
+.DS_Store
+.npmrc
+__pycache__/
+*.py[cod]

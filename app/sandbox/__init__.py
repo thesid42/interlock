@@ -4,12 +4,34 @@ import base64
 import hashlib
 import json
 import re
+import shlex
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
 
 from app.integrations.common import IntegrationError, IntegrationUnavailable
 from app.integrations.guild import GuildClient
+
+
+WORKER_SHA256 = "d9032c6b242afd05454b670da010fe068e737a9e4cfdc4b2cd69b007dbcf8937"
+
+
+def _worker_command(payload: dict) -> str:
+    path = Path(__file__).resolve().parents[2] / "integrations/guild/incident-investigator/replay.py"
+    try:
+        worker = path.read_bytes()
+    except OSError:
+        raise IntegrationUnavailable("The fixed Guild replay program is missing from this deployment") from None
+    if hashlib.sha256(worker).hexdigest() != WORKER_SHA256:
+        raise IntegrationUnavailable("The fixed Guild replay program does not match its published hash")
+    bootstrap = (
+        'import hashlib; code=open("/tmp/interlock/replay.py","rb").read(); '
+        'assert hashlib.sha256(code).hexdigest()=="' + WORKER_SHA256 + '"; '
+        'exec(compile(code,"<interlock-replay>","exec"))'
+    )
+    data = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).decode("ascii")
+    return "python3 -I -B -c " + shlex.quote(bootstrap) + " --base64 " + shlex.quote(data)
 
 
 class _ManifestLoader(yaml.SafeLoader):
@@ -206,9 +228,8 @@ class IncidentSandbox:
         except (KeyError, ValueError, TypeError):
             return {"state": "failed", "result": None, "error": "Snapshot failed sanitized export requirements"}
         try:
-            encoded = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).decode()
             envelope = {"protocol": "memguard-guild-replay-v1", "snapshot_hash": payload["snapshot_hash"],
-                        "worker_command": "python3 -I -B \"${HOME:?HOME must be set}/.local/share/interlock/replay.py\" --base64 '" + encoded + "'"}
+                        "worker_sha256": WORKER_SHA256, "worker_command": _worker_command(payload)}
             session = self.guild.start_session(json.dumps(envelope, separators=(",", ":")))
         except IntegrationUnavailable as exc:
             return {"state": "unavailable", "result": None, "error": str(exc)}
@@ -263,7 +284,8 @@ class IncidentSandbox:
                       and isinstance(reference.get("status"), str)
                       and task.get("status") == reference["status"]]
         root = root_tasks[0] if len(root_tasks) == 1 else None
-        actual_tasks = [root] if root and root.get("runtime_id") in runtime_ids else []
+        actual_tasks = [root] if root and (root.get("runtime_id") in runtime_ids or any(
+            row.get("created_by_id") == root.get("id") for row in isolated)) else []
         if root:
             base.update(root_task_id=root.get("id"), root_task_status=root.get("status"),
                         root_task_verified=True,
@@ -275,19 +297,18 @@ class IncidentSandbox:
             return {**base, "state": "failed", "error": "Guild investigation reported a runtime error or interruption"}
         if root and root.get("status") == "CREATED" and not runtimes:
             return {**base, "state": "pending", "error": "Guild root task exists; awaiting runtime startup"}
+        if root and root.get("status") != "DONE":
+            return {**base, "state": "pending"}
         try:
-            page = self.guild.poll(session_id, from_id)
+            if root and root.get("status") == "DONE":
+                page = self.guild.poll(session_id, from_id, event_types="runtime_done")
+            else:
+                page = self.guild.poll(session_id, from_id)
         except IntegrationError:
             return {**base, "state": "pending", "error": "Guild event polling failed; existing session was not restarted"}
         base.update(next_cursor=page["next_cursor"], has_more=page["has_more"],
                     events=[{"id": event.get("id"), "type": event.get("type"),
                              "task_id": event.get("task_id")} for event in page.get("events", [])])
-        if not page.get("replies") and root and root.get("status") == "DONE":
-            try:
-                completed = self.guild.poll(session_id, event_types="runtime_done")
-                page["replies"] = completed.get("replies", [])
-            except IntegrationError:
-                pass
         if root and (root.get("status") in {"ERROR", "INTERRUPTED"} or any(
                 event.get("task_id") == root.get("id") and event.get("type") in {
                     "runtime_error", "system_error", "interrupted"} for event in page.get("events", []))):
@@ -314,17 +335,21 @@ class IncidentSandbox:
                         raise ValueError("Invalid bounded replay observation")
             except (KeyError, ValueError, TypeError):
                 return {**base, "state": "failed", "error": "Guild returned an invalid or unbound replay report"}
-            result["evidence_kind"] = "validated_report_from_isolated_runtime"
+            result["evidence_kind"] = "hash_bound_report_from_pinned_guild_task"
             result["replay_execution_verified"] = False
             result["limitations"] = [
                 "Sanitized typed reconstruction, not a clone of the original agent process.",
-                "Runtime and pinned task version are API-verified; a final report is not proof that the fixed worker ran.",
+                "The session, pinned task version and report hash are API-verified; a final report is not independent proof of shell execution.",
+                "Guild's public API may omit private environment and session-lock metadata; missing metadata is not treated as verified isolation.",
                 "The public task API does not expose a fixed shell command to authenticate worker execution.",
                 "Goose prompt instructions request the fixed worker but are not an enforced shell-command allowlist.",
                 "Model explanations are hypotheses, not root-cause certainty or sandbox escape guarantees."]
-            if not base["isolation_verified"] or root.get("status") != "DONE":
+            if root.get("status") != "DONE":
                 return {**base, "state": "pending", "result": result,
-                        "error": "Report received; session-locked runtime/image or terminal root-task evidence is still missing"}
+                        "error": "Report received; awaiting terminal root-task evidence"}
+            if not base["isolation_verified"]:
+                return {**base, "state": "reported", "result": result,
+                        "error": None, "verification_limitation": "Report received from the pinned Guild task; runtime isolation metadata is unavailable through the public API"}
             self._runtime_verified = True
             self._detail = "Guild session-locked coding runtime and pinned task version verified"
             return {**base, "state": "reported", "result": result}

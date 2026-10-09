@@ -1,12 +1,13 @@
 # Guild Hosted Investigation
 
 Guild owns the incident investigation runtime. Interlock does not run a local
-Docker sandbox and does not silently substitute one. The investigator has been
-published as internal version `v1.0.0` and installed in its dedicated workspace.
-The installation's automatic updates were disabled and read back as disabled.
-Environment and image record IDs were resolved through Guild's official CLI,
-not inferred from names or Docker tags. These setup records are not a hosted
-investigation result or proof of exact replay-worker execution.
+Docker sandbox and does not silently substitute one. Its dedicated investigator
+is installed with automatic updates disabled. Environment and image record IDs
+come from actual Guild metadata, not names or Docker tags. The HTTP API trigger
+has returned `201`; successful session creation is not successful replay or RCA.
+The fixed-path worker recipe is published, installed and pinned as `v1.0.5`, confirmed
+through CLI readback. Its actual end-to-end demo failed; no valid worker report was
+accepted. See Integration Status below for the observed failures.
 
 ## Prepare The Runtime
 
@@ -17,20 +18,24 @@ investigation result or proof of exact replay-worker execution.
 2. Create a private runtime environment named `interlock-incident` using
    the documented Goose base image `guildai~goosebox`. The image must provide
    Bash and Python 3. Use `incident-investigator/environment_setup.sh` as its setup
-   script, or preinstall the same `replay.py` at
-   `$HOME/.local/share/interlock/replay.py` in a registered image. The setup account
-   needs a nonempty absolute `HOME` and permission to prepare that path.
-   Run Guild's Test setup control and inspect its runtime logs before publishing.
-   A later bounded investigator run must also confirm that its runtime user and
-   `HOME` can access the same worker; setup success alone does not establish this.
+   script. It checks Python, verifies the reviewed worker hash and runs a synthetic
+   self-check before atomically installing `/tmp/interlock/replay.py` with mode
+   `0444` inside a mode `0755` directory. It requires no particular runtime home.
+   Apply the updated script, Save, run Test setup and inspect the logs. A passing
+   setup check alone does not attest a later incident runtime or replay.
 3. Set its qualified `<owner>~interlock-incident` reference in
    `incident-investigator/guild.yaml`. Publish
    `recipe.yaml` and `guild.yaml` as a Goose agent, install its reviewed version
    in the dedicated workspace and disable automatic updates. Do not add service
    integrations, sub-agents or platform mutation tools.
-4. Create a Guild account API key with `sessions:write`, `workspaces:read` and
-   `agents:read`. Interlock expects the complete `id:secret` value in
-   `GUILD_API_KEY`; never put it in the agent or environment. The deployed runner
+4. Create an account API key with `workspaces:read` and `agents:read` for metadata
+   in `GUILD_API_KEY`. In the dedicated workspace's Guild UI, create an API trigger
+   for its installed investigator. Set the separate complete `id:secret` trigger
+   credential in `GUILD_TRIGGER_API_KEY` and its trigger record ID in
+   `GUILD_TRIGGER_ID`. These are server-side secrets, never browser/agent variables.
+   Trigger credentials can have workspace-wide capabilities; pinning an ID in
+   Interlock does not narrow the credential itself. Do not reuse a production
+   workspace. The deployed runner
    uses Guild's own configured model. Akash-hosted Qwen proposals are generated
    separately by the Interlock backend; Guild does not automatically route
    `task.llm` to that custom inference URL.
@@ -48,28 +53,26 @@ investigation result or proof of exact replay-worker execution.
    export boundary. It is intentionally false in the template. No hosted
    investigation session is started while it is false.
 
-The setup script uses Python's standard library rather than GNU `install` or
-shell process substitution. It explicitly uses `$HOME/.local/share/interlock`,
-creates a user-only directory (mode `0700` for a new directory), and atomically installs fixed
-hash-checked worker bytes with mode `0444`, and prints `setup_complete` only after
-reading the installed file back. A failure reports its exact filesystem stage
-and errno without printing environment variables or requesting privileges.
-The user's hosted test confirmed that `/opt/interlock` is not writable by the
-setup user (errno `13`). The user reports that the new home-based path passed
-Guild's Test setup. Guild's docs do not specify unchanged setup/runtime user and
-home. A later investigator run must still verify runtime accessibility, not merely
-provisioning.
-If directory creation fails, inspect Guild's raw setup stderr; do not add `sudo`
-or silently use another path. The runtime command fails if `HOME` is unset or empty.
-File mode and hash checks describe provisioning, not runtime immutability or
-attestation. A runtime user able to modify the parent directory can replace the
-worker, so the investigation's existing incomplete-evidence limits still apply.
+The reviewed setup script installs the worker at `/tmp/interlock/replay.py` only
+after verifying SHA-256
+`d9032c6b242afd05454b670da010fe068e737a9e4cfdc4b2cd69b007dbcf8937`.
+Interlock also checks its trusted local `incident-investigator/replay.py` source
+hash. Each incident request sends only a short fixed `python3 -I -B -c` bootstrap
+that reads the installed path, verifies the hash and executes those bytes. It does
+not send the full worker code for Goose to transcribe. Evidence is a separate
+`--base64` argument, never Python source. The worker uses fake publish/deny canaries,
+makes no external calls and performs no filesystem writes. No runtime-home path,
+downloaded code or privilege escalation is needed. Python's isolation flags are not
+container attestation, and base64 is encoding, not encryption or a security boundary.
 
-The worker is provisioned in the runtime environment because Guild does not
-load arbitrary files placed beside a Goose recipe. It uses fake publish/deny
-canaries and makes no external calls. The runner receives a fixed worker path
-and one base64 data argument to avoid interpolating evidence into shell syntax.
-Base64 is transport encoding, not encryption or a security boundary.
+Setup uses Python's standard library for the hash and synthetic no-external-effect
+checks, atomic installation and installed-byte readback. It prints `setup_complete`
+only after these checks; failure output includes the stage, not credentials.
+Setup never consumes suspect incident data. Changing the reviewed worker requires
+an explicit source/hash/recipe review rather than model-generated replacement code.
+Read-only file mode is not immutability: a user able to write its parent directory
+can replace the file. Hash checking and setup readback do not attest task execution.
+
 The Goose recipe requests fixed worker execution but does not enforce a command
 allowlist. A model can still propose other shell commands. Real isolation and
 credential restrictions must come from Guild's runtime and account policies,
@@ -77,6 +80,21 @@ not these prompt instructions. Stronger command guarantees require a documented
 deterministic hosted tool contract, which is not implemented by this recipe.
 
 ## Evidence Boundary
+
+The backend uses Guild's HTTPS API-trigger interface, not CLI execution or an
+account-key chat request. It sends Basic authentication using the separate trigger
+`id:secret` credential and creates a session on the metadata-verified named route:
+
+```text
+POST /workspaces/{owner}/{workspace}/sessions
+{"session_type":"api_trigger","agent_input":{"text":"<bounded incident envelope>"}}
+```
+
+Session reads use the same trigger credential. The request omits an agent override;
+the installed investigator and returned workspace/trigger/root-version bindings
+are checked independently. API-trigger capability can cover the whole workspace,
+so the workspace must remain dedicated and credential-free. The product does not
+invoke Guild CLI/OAuth execution or silently fall back to it.
 
 The exported packet contains at most four approved public HTTPS source excerpts
 of 512 characters each, source IDs/hashes, canonical app-owned policy, and at
@@ -102,14 +120,19 @@ task, and that root must have documented status `DONE`. Remote terminal status
 is recorded independently using `DONE`, `ERROR` or `INTERRUPTED`. Ambiguous
 tasks never authorize an automatic replacement session. Guild documents network-isolated coding containers with mediated
 egress and server-side credentials; setup still has network access.
+Runtime `created_by` matching the root task is provenance only; it does not replace
+an actual `locked_for_session_id` match or establish exclusive isolation.
 
-The public task API does not expose enough information to authenticate an exact
-shell command. Consequently the current adapter labels a valid runtime-bound
-report `reported`, with `replay_execution_verified=false`. It does not call RCA
-complete, treat a stdout marker as attestation, or claim that the fixed worker
-ran solely because the model says so. Correlated Qwen explanations remain
-hypotheses. Full worker execution verification needs a documented stronger
-execution-evidence contract or a supported deterministic hosted runner.
+The public task API does not authenticate an exact worker command. An event from
+the exact pinned root task with status `DONE` can supply a `reported` result when
+its incident ID, snapshot hash and bounded observations match the submitted packet.
+Missing environment or session-lock attestation does not leave that valid report
+pending indefinitely: the investigation finishes `review_required`, with the missing
+`isolation_verified` evidence false and `replay_execution_verified=false`.
+Qwen's follow-up remains advisory and carries those limitations. Manual review is
+required and the managed agent stays contained. A stdout marker
+or a model claim cannot attest worker execution or complete RCA. Stronger execution
+verification needs a documented deterministic runner or evidence contract.
 
 A successful bounded integration check proves only the stages recorded in its
 result: authentication, publication/installation binding, session creation,
@@ -117,30 +140,48 @@ reported output, terminal status and runtime metadata must remain distinct.
 Do not turn publication success, a passing setup control or one model reply into
 "RCA complete".
 
-## One Integration Run
+## Integration Status
 
-On 2026-10-09, one operator-requested controlled `recorded_demo` run produced:
+The controlled `recorded_demo` path on 2026-10-09 showed:
 
 - Successful local containment and two completed live Qwen diagnostic probes.
 - Eleven real audit events visible in ClickHouse after reconciliation: ten
   original run events plus `security_hosted_session_reconciled`. Pending outbox
   count remained zero at the final check.
-- Guild chat returned HTTP `403` after persisting the session and exported user
-  message. Read-only reconciliation matched that message to the frozen incident
-  packet and its exact export hash. The session's `root_task` matched the scoped
-  task listing, verifying root-task identity on the pinned version. That task
-  remained `CREATED`; no runtime or task-to-runtime association was reported.
+- Earlier account-key chat requests returned HTTP `403`. Their two sessions were
+  subsequently interrupted; these requests are not the supported product transport.
 
-This is a partial integration result, not verified hosted worker execution or
-complete RCA. The provider's exact denial reason remains unknown. Preserve the
-existing session and failure details for manual reconciliation; do not retry,
-create another session or resume the contained agent automatically.
+A genuine HTTP API-trigger request returned `201` for the configured workspace
+and trigger. Its pinned `v1.0.0` root reached `DONE`, but reported a missing runtime
+worker and null environment metadata. A later `v1.0.2` CLI diagnostic resolved the
+custom environment but still reported the missing file. These are troubleshooting
+observations, not verified replay or RCA; CLI remains setup/diagnostic tooling, not
+the application's runtime transport.
+
+An inline-worker attempt failed after Goose altered the static command. The current
+fixed-path recipe is published, installed and pinned as `v1.0.5`, version UUID
+`01a122bc-4340-cf83-0000-dfe1ad80c828`, with automatic updates disabled, confirmed
+through CLI readback. Remote setup-script content matches the reviewed local script.
+The actual demo session `01a122bd-409f-f9c4-0000-f3f6ff6bcb91` failed. Its first
+recorded Goose shell attempt raised `FileNotFoundError` for `/tmp/interlock/replay.py`
+despite correct CLI runtime-environment metadata. Its final reply failed with
+`Frozen diagnostic hash did not match`; it was not a valid worker report. Public
+API readback confirmed the exact pinned root `DONE` at `22:17:54Z` and runtime
+`DESTROYED` at `22:18:24Z`. The app marked the investigation failed, kept the agent
+contained and did not run Qwen advisory analysis. Qwen's HTTP connection was verified
+separately; 24 demo audit events reached ClickHouse with pending outbox count zero.
+The setup/runtime fix has not succeeded. Preserve the actual flags and provider
+evidence; no automatic retry, replacement session or contained-agent resumption
+is authorized.
 
 `GUILD_SANDBOX_TIMEOUT_SECONDS` is a local polling deadline, not an enforced
 remote wall-clock or spending limit. Guild's current public OpenAPI exposes no
-session stop endpoint. On a deadline, inspect the saved session ID and use
-Guild's End session control. The provider may continue until that happens.
-Session-creation timeouts are uncertain and are never automatically retried.
+session stop endpoint. If a deadline expires without verified root-terminal status,
+inspect the saved session ID and use Guild's End session control; provider work may
+continue. If the exact root is already verified terminal but required report
+evidence is unavailable, the job fails for missing evidence without claiming it
+is still running. Session-creation timeouts remain uncertain and are never
+automatically retried.
 
 ## Official Contracts
 
@@ -150,6 +191,7 @@ Session-creation timeouts are uncertain and are never automatically retried.
 - [Goose recipes](https://docs.guild.ai/guide/goose-agents)
 - [Environment declaration](https://docs.guild.ai/guide/guild-yaml)
 - [API authentication](https://docs.guild.ai/api-reference/introduction)
+- [HTTP API triggers](https://docs.guild.ai/platform/api-triggers)
 - [Session runtimes](https://docs.guild.ai/api-reference/sessions/fetch-session-runtimes)
 - [Session execution tasks](https://docs.guild.ai/api-reference/sessions/fetch-session-sub-tasks)
 - [Session controls](https://docs.guild.ai/platform/sessions)

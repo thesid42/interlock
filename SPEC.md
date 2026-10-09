@@ -42,7 +42,7 @@ with a three-minute demonstration. They do not require every example action
 | Autonomy | A backend worker reads registered live sources and runs the approved workflow without repeated browser clicks. |
 | Idea | Detecting and containing actual forbidden agent actions, with inspectable incident evidence and recovery. |
 | Implementation | Durable scheduling, pre-dispatch authorization, containment, frozen snapshots, real isolation and bounded investigations. |
-| Tool use | Successful Akash-hosted inference, ClickHouse ingestion/queries and Guild investigation sessions. |
+| Tool use | Live Akash-hosted inference and ClickHouse ingestion/queries; Guild session creation verified, but replay currently failed. |
 | Demo | One live legitimate task plus a clearly labeled controlled attack, containment, investigation and legitimate recovery. |
 
 Monitoring, investigation orchestration and publishing in-app briefs/incidents
@@ -118,11 +118,26 @@ bounded frozen public-source data and a fixed reviewed replay worker, not produc
 or a live agent's unrestricted tools. Do not execute model-provided shell commands,
 malicious binaries or downloaded source code in this MVP.
 
+The environment setup verifies Python, the reviewed worker's pinned SHA-256 and
+a synthetic result before atomically installing `/tmp/interlock/replay.py` with
+file mode `0444` and directory mode `0755`. Setup never consumes incident data.
+The backend verifies its trusted local `replay.py` source hash and sends only a
+short static `python3 -I -B -c` bootstrap that reads the fixed remote path, checks
+the same hash and executes those bytes. Pass bounded evidence as a separate base64
+data argument, never Python source; do not send the whole worker program per request.
+This avoids runtime-home and model-transcribed worker-source dependencies, not the
+need for environment installation. The worker needs no downloads and performs no
+filesystem writes. File modes, hash checks and Python's `-I`/`-B` options are not
+proof of execution or a replacement for Guild's runtime isolation.
+
 Check documented session runtime records separately from chat connectivity. Record
 session ID, runtime/container IDs, image and status; require the runtime's
 `locked_for_session_id` to match the incident session before claiming exclusive
 session isolation. A chat response or model-produced JSON cannot attest a container.
-Missing runtime evidence is unavailable isolation, not a successful sandbox.
+Missing runtime evidence is unavailable isolation, not a successful sandbox; it
+does not prevent retaining a separately bound terminal report requiring manual review.
+Runtime creator/root-task association proves provenance only, not an exclusive
+session lock or a custom environment's successful build resolution.
 See [Guild environments](https://docs.guild.ai/platform/environments).
 
 Bind source configuration and executed runtime in separate stages. Before creating
@@ -131,9 +146,10 @@ updates and its saved `guild.yaml` qualified environment declaration. The live
 version record does not expose `runtime_environment_id`; do not reject a correct
 version solely for that absent field or invent its value. Resolve the expected
 environment/image record IDs through actual Guild metadata. After dispatch,
-require the session runtime's exact environment UUID, image ID and session lock,
-and the root task's exact pinned agent version. A declared environment name alone
-does not establish those execution-time bindings.
+require the session runtime's exact environment UUID, image ID and session lock
+before claiming isolation. Bind every accepted report to the session's exact root
+task and pinned agent version. A declared environment name alone does not establish
+those execution-time bindings.
 
 Qwen remains on the user's Akash deployment, called by the trusted backend. Its
 bounded diagnostic proposals are frozen for replay in Guild. Guild's built-in
@@ -166,17 +182,25 @@ isolation must come from the application boundary and Guild/account configuratio
 not an instruction to behave safely. Stronger command confinement needs a documented
 deterministic hosted runner or restricted tool contract.
 
-The current Guild public API can corroborate a session-locked runtime and pinned
-agent task version, but does not authenticate the exact replay-worker shell command.
-A final JSON report is therefore reported evidence: preserve it as incomplete,
-with `replay_execution_verified=false`, not completed RCA. Inspect provider logs
-manually for corroboration; do not silently turn a model statement into observation.
+The current Guild public API can expose runtime and pinned task metadata, but does
+not authenticate the exact replay-worker command. Accept a final JSON report only
+when its incident ID, snapshot hash and bounded observations match the export and
+its event belongs to the exact pinned root task with status `DONE`. Such a report
+is `reported` evidence, not completed RCA. Finish the job as `review_required` even when
+environment/session-lock metadata is missing; keep `isolation_verified=false` for
+missing attestation and `replay_execution_verified=false`. Qwen may provide advisory
+hypotheses with those limitations, not an assertion that isolated execution occurred.
+Manual review remains required and the managed agent stays contained.
+Inspect provider logs manually for corroboration; a model statement is not attestation.
 
 The public OpenAPI does not expose a stop/cancel operation. The configured timeout
-is a local polling deadline, not guaranteed remote termination. If it expires,
-preserve the session ID, mark reconciliation required and warn that provider work
-or spend may continue. The operator must end that exact session in Guild's UI;
-do not automatically start a replacement session. See
+is a local polling deadline, not guaranteed remote termination. If it expires
+without verified root-terminal evidence, preserve the session ID, mark reconciliation
+required and warn that provider work or spend may continue. The operator must end
+that exact session in Guild's UI. If the exact root is already verified terminal
+but a bound report is unavailable, mark the investigation failed for missing evidence
+without claiming execution is still running. Do not automatically start a replacement
+session. See
 [Guild sessions](https://docs.guild.ai/platform/sessions) and
 [public API specification](https://api.guild.ai/v1/openapi.yaml).
 
@@ -279,9 +303,18 @@ arbitrary destination strings and credentials. Sanitized replay is not an exact
 reproduction of the full private context; record that limitation. A stdout marker
 or final model JSON alone cannot verify execution of the reviewed replay worker.
 
-Account API keys and trigger-only keys differ. Use the complete account key
-ID/secret with necessary `sessions:write`, `workspaces:read` and `agents:read`
-scopes. A successful workspace check is not a completed hosted investigation.
+Account API keys and API-trigger keys differ. Use `GUILD_API_KEY` with
+`workspaces:read` and `agents:read` for account/resource metadata. Execution uses
+the dedicated workspace's UI-issued `GUILD_TRIGGER_API_KEY=id:secret` and separate
+`GUILD_TRIGGER_ID`. The backend sends Basic authentication to
+`POST /workspaces/{owner}/{workspace}/sessions` with
+`{"session_type":"api_trigger","agent_input":{"text":"<bounded incident envelope>"}}`.
+Session reads use the same trigger credential; omit agent overrides and verify
+the returned workspace, trigger and pinned root task. The trigger credential can
+have workspace-wide capabilities, so use a dedicated credential-free workspace,
+not a production workspace. Never expose either secret to browser/agent state.
+No Guild CLI/OAuth runtime fallback is part of the application transport.
+A successful workspace check is not a completed hosted investigation.
 The live account identity endpoint returns `permissions` as `{group, access}`
 objects, not the rendered documentation's former `scopes` string array. Validate
 the actual response contract. Authentication can be checked before investigator
@@ -299,26 +332,34 @@ Session creation may succeed remotely before a response is lost: mark ambiguous
 creation uncertain and reconcile when supported, rather than blindly retrying.
 See [Guild's API contract](https://docs.guild.ai/api-reference/introduction).
 
-Account setup recorded on 2026-10-09 includes an internal published investigator
-`v1.0.0`, installation in the dedicated workspace, disabled automatic updates
-confirmed by readback, and environment/image IDs resolved through Guild's official
-CLI. This records setup metadata only, not a verified hosted replay, exact worker
-execution or complete RCA. An explicitly requested bounded integration check must
-report its actual stages and preserve incomplete execution-evidence limits.
+Setup checks on 2026-10-09 confirmed investigator publication/installation,
+disabled automatic updates and resolved environment/image IDs. Controlled
+`recorded_demo` checks verified local containment, two live Qwen diagnostic probes
+and eleven reconciled ClickHouse events with pending outbox count zero. Earlier
+account-key chat attempts returned `403` and were interrupted; the supported HTTP
+API trigger subsequently returned `201`. A `v1.0.0` terminal task reported a missing
+worker and null runtime environment. A later `v1.0.2` CLI diagnostic resolved the
+custom environment but still reported the missing worker file. Neither proves a
+successful replay, verified isolation or complete RCA; CLI remains setup/diagnostic
+tooling, not application execution transport.
 
-One operator-requested controlled `recorded_demo` integration run on 2026-10-09
-verified local containment and two completed live Qwen diagnostic probes.
-The final ClickHouse check showed eleven actual audit events: ten original events
-plus `security_hosted_session_reconciled`, with pending outbox count zero.
-Guild chat returned HTTP `403` after the session and exported user message were
-persisted. Read-only reconciliation matched the message's exact frozen packet
-hash and incident binding. The session's `root_task` matched its scoped task
-listing, verifying root-task identity on the pinned agent version, but its status
-remained `CREATED`. No runtime or task-to-runtime association was reported;
-hosted execution, isolation and RCA remain unverified.
-The exact provider denial reason is unknown. Retain the existing session and
-failure evidence for manual reconciliation; no automatic retry, replacement
-session or contained-agent resumption is authorized by this partial result.
+The inline-worker attempt failed after Goose altered the static command. The
+current `environment_setup.sh` instead installs the fixed worker at
+`/tmp/interlock/replay.py` after its hash and synthetic checks; each incident request
+carries only a short hash-checking bootstrap plus separate evidence. Its `v1.0.5`
+version is published, installed and pinned with automatic updates disabled, confirmed
+through CLI readback. The remote setup-script content matches the reviewed local
+script, but the actual `v1.0.5` demo failed: its first recorded Goose shell attempt
+raised `FileNotFoundError` for `/tmp/interlock/replay.py` despite correct CLI
+environment metadata. Its final reply failed with `Frozen diagnostic hash did not match`.
+Public API metadata confirmed the exact pinned root `DONE` at `22:17:54Z` and the
+runtime `DESTROYED` at `22:18:24Z`; neither is successful replay or attestation.
+The application marked the investigation failed, kept the agent contained and did
+not run Qwen advisory analysis. Qwen's HTTP connection was independently verified;
+24 demo audit events reached ClickHouse with pending outbox count zero. No valid
+worker report or successful runtime fix is claimed. Do not retry uncertain creation
+automatically or resume a contained agent from task status.
+See [Guild API triggers](https://docs.guild.ai/platform/api-triggers).
 
 ### Slack MCP
 
@@ -497,8 +538,9 @@ Acceptance must distinguish implemented adapters from successful live connectivi
 2. Scheduled runs continue without browser clicks and cannot overlap themselves.
 3. A forbidden action is denied and the agent remains contained across restart.
 4. Snapshot inspection reveals exact inputs, policy and observed action evidence.
-5. With Guild provisioned, a hosted replay has matching exclusive runtime evidence
-   and bounded observed checks. Missing runtime evidence stays unavailable/incomplete.
+5. With Guild provisioned, an exact terminal root produces an incident/hash-bound
+   report. Exclusive isolation requires separate matching runtime evidence; missing
+   attestation keeps the job `review_required`, not indefinitely pending or verified.
 6. Qwen/Guild hypotheses reference supplied evidence and cannot resume the agent.
 7. Real ClickHouse exports/queries and hosted Guild sessions demonstrate substantive
    sponsor use, with missing providers honestly marked.

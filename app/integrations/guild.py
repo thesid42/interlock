@@ -98,7 +98,8 @@ class GuildClient:
         required = (("agents", "read"), ("workspaces", "read"))
         missing = [f"{group}:{access}" for group, access in required if not self._allows(group, access)]
         permissions_verified = self._verified and self._permissions_known and not missing
-        return {**ProviderState("guild", self.configured, self._verified, self._detail).as_dict(),
+        return {**ProviderState("guild", self.configured,
+                    self._verified and self._trigger_verified, self._detail).as_dict(),
                 "key_configured": bool(self.api_key), "authentication_verified": self._verified,
                 "permissions_known": self._permissions_known,
                 "permissions_verified": permissions_verified,
@@ -162,7 +163,12 @@ class GuildClient:
         self._permissions_known = True
         self._verified = True
         ready = self.readiness()
-        self._detail = "Account key and required permissions verified" if ready["permissions_verified"] else "Account key valid; required permissions are missing"
+        if not ready["permissions_verified"]:
+            self._detail = "Account key valid; required metadata permissions are missing"
+        elif self._trigger_verified:
+            self._detail = "Account metadata and API-trigger authentication verified; isolated runtime checked separately"
+        else:
+            self._detail = "Account metadata verified; API-trigger authentication has not been checked"
         return {"state": "authenticated" if ready["permissions_verified"] else "permission_required",
                 "readiness": self.readiness(),
                 "detail": "Account authentication only; published investigator and isolated execution are checked separately."}
@@ -177,9 +183,9 @@ class GuildClient:
             raise IntegrationUnavailable("GUILD_TRIGGER_ID must be the trigger record ID, not its API-key ID")
         if not isinstance(self.trigger_api_key, str) or not 1 <= len(self.trigger_api_key) <= 4096:
             raise IntegrationUnavailable("GUILD_TRIGGER_API_KEY must contain the complete id:secret credential")
-        parts = self.trigger_api_key.split(":")
+        parts = self.trigger_api_key.split(":", 1)
         if (len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", parts[0])
-                or not parts[1].startswith("glda_") or len(parts[1]) <= 5
+                or len(parts[1]) < 8
                 or any(not 33 <= ord(char) <= 126 for char in parts[1])):
             raise IntegrationUnavailable("GUILD_TRIGGER_API_KEY must contain the complete id:secret credential")
         return "Basic " + base64.b64encode(self.trigger_api_key.encode("ascii")).decode("ascii")
@@ -403,6 +409,8 @@ class GuildClient:
                     and links["workspace_agent_id"] != self._expected_workspace_agent_id):
                 raise IntegrationError("Guild session trigger targets a different installed investigator")
         self._trigger_verified = True
+        self._detail = ("Account metadata and API-trigger authentication verified; isolated runtime checked separately"
+            if self._verified else "API-trigger authentication verified; account metadata has not been checked")
         return data
 
     def get_session(self, session_id: str) -> dict:
@@ -415,8 +423,9 @@ class GuildClient:
         rows = self._page(f"/sessions/{quote(session_id, safe='')}/runtimes", session=True)
         rows = [_normalize_links(row, (("workspace_id", ("workspace",)),
                 ("runtime_environment_id", ("runtime_environment", "environment")),
+                ("created_by_id", ("created_by",)),
                 ("locked_for_session_id", ("locked_for_session",)))) for row in rows]
-        keys = ("id", "workspace_id", "locked_for_session_id", "runtime_environment_id", "container_id",
+        keys = ("id", "workspace_id", "created_by_id", "locked_for_session_id", "runtime_environment_id", "container_id",
                 "status", "created_at", "started_at", "destroyed_at")
         return [_metadata_fields(row, keys) | {"image": {"id": _metadata_value(row["image"].get("id"))}
                 if isinstance(row.get("image"), dict) else _metadata_value(row.get("image"))} for row in rows]
@@ -446,8 +455,9 @@ class GuildClient:
                 "incident_id": incident_id, "state": "started"}
 
     def poll(self, conversation_id: str, from_id: str | None = None, *, event_types: str | None = None) -> dict:
-        params = {"sort_by": "id", "limit": 100}
-        if from_id:
+        terminal_receipt = event_types == "runtime_done"
+        params = {"sort_by": "-id", "limit": 1} if terminal_receipt else {"sort_by": "id", "limit": 25}
+        if from_id and not terminal_receipt:
             params["from_id"] = from_id
         if event_types:
             params["types"] = event_types
@@ -460,10 +470,15 @@ class GuildClient:
             for item in events if item.get("type") == "runtime_done"
             and isinstance(item.get("content"), dict)
             and isinstance(item["content"].get("text"), str) and item["content"]["text"]]
+        replies.extend({"event_id": item.get("id"), "task_id": item.get("task_id"),
+                        "text": json.dumps(item["content"], separators=(",", ":"))}
+            for item in events if item.get("type") == "runtime_done"
+            and isinstance(item.get("content"), dict)
+            and item["content"].get("protocol_version") == 1 and "text" not in item["content"])
         ids = [item["id"] for item in events if isinstance(item.get("id"), str)]
         return {"provider": "guild", "mode": "live", "session_id": conversation_id,
                 "state": "reply_available" if replies else "pending", "replies": replies,
-                "next_cursor": ids[-1] if ids else from_id,
+                "next_cursor": ids[-1] if ids and not terminal_receipt else from_id,
                 "events": [{key: item.get(key) for key in ("id", "type", "task_id", "created_at")}
                            for item in events],
                 "has_more": bool(data.get("pagination", {}).get("has_more", False))}

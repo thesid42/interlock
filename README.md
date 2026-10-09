@@ -89,11 +89,21 @@ under [integrations/guild](integrations/guild). Use a supported Guild inference 
 for its host agent; do not assume Guild routes a model alias to your Akash endpoint.
 The backend uses your Akash Qwen to produce frozen typed diagnostic cases.
 
-Set `GUILD_API_KEY` to the complete account `id:secret`, plus the exact
+Set `GUILD_API_KEY` to the complete account `id:secret` for `agents:read` and
+`workspaces:read` metadata checks, plus the exact
 `GUILD_SANDBOX_WORKSPACE_ID`, `GUILD_SANDBOX_AGENT_ID`, installed version,
 environment and image IDs from your account. Follow the investigator's setup guide
 for scopes, credential restrictions and version pinning. Legacy simulation Guild
 raw-snapshot export is disabled; use the bounded Operations investigation path.
+
+Create an API trigger for the installed investigator through Guild's workspace
+UI. Set its complete `id:secret` in `GUILD_TRIGGER_API_KEY` and its separate trigger
+record ID in `GUILD_TRIGGER_ID`. The backend uses Basic authentication on
+`POST /workspaces/{owner}/{workspace}/sessions`, sending
+`session_type: api_trigger` and a bounded `agent_input.text` envelope. Session reads
+use the same key. No agent override or CLI/OAuth runtime fallback is used.
+Trigger capability can cover the entire workspace, so keep it dedicated and free
+of production credentials. These secrets never belong in the frontend.
 
 Connections checks the account key independently of investigator configuration
 and offers read-only workspace/agent/version discovery. The current live identity
@@ -109,16 +119,46 @@ policy/action checks and canary cases. Private memory, mission, draft bodies,
 arbitrary destinations and credentials are excluded. The user's consent covers
 this bounded payload, not unrestricted production data export.
 
-A successful chat is not proof of a sandbox. Interlock records session/runtime IDs,
-checks exclusive session ownership and validates replay observations. Missing or
-ambiguous evidence remains unavailable/incomplete/uncertain. Guild results cannot
-resume agents. Live hosted isolation still needs verification in your account.
+A successful chat is not proof of a sandbox. Interlock records session/runtime IDs
+and requires matching session-lock, environment, image and root-task evidence before
+claiming isolation. Runtime creator/root-task linkage is provenance, not a session
+lock. A valid report bound to the incident/hash and exact terminal `DONE` root task
+can be retained as `reported` even when runtime attestation is unavailable. The
+investigation finishes as `review_required`; missing isolation and worker-execution
+flags stay false, and Qwen's follow-up is advisory only. Manual review is required
+and the managed agent stays contained. Guild results cannot resume agents.
+
+The environment setup checks Python and the reviewed worker's pinned SHA-256,
+passes a synthetic self-check, then atomically installs `/tmp/interlock/replay.py`
+with file mode `0444` and directory mode `0755`. It does not consume incident data.
+The backend checks its local source hash and sends only a short fixed
+`python3 -I -B -c` bootstrap that reads this path, verifies the hash and executes
+the worker. Bounded evidence is a separate base64 argument, not generated code;
+the full worker source is not sent per request. No runtime-home path or download
+is required. File permissions and hash checks are not execution attestation.
+
 The Goose recipe requests a fixed command but does not enforce a shell allowlist.
 Do not treat its instructions as a security boundary. The public task API cannot
-authenticate the exact worker command; such reports
-remain incomplete rather than verified replay. The timeout is a polling deadline,
-not remote termination: end the exact session in Guild UI if it expires, reconcile
-its status/spend and do not blindly start another investigation.
+authenticate the exact worker command; a model report is not verified replay. The
+timeout is a polling deadline, not remote termination. A verified terminal root
+with missing evidence fails as evidence-unavailable; an unverified terminal state
+requires reconciliation because provider work may continue. End that exact session
+in Guild when needed and do not blindly start another investigation.
+
+The genuine HTTP API trigger returned `201`. Earlier tasks reported a missing
+runtime worker; a later `v1.0.2` CLI diagnostic resolved the custom environment but
+still lacked that file. These checks do not establish successful replay or RCA.
+An inline worker attempt also failed after Goose altered the static command.
+The current fixed-path `v1.0.5` recipe is published, installed and pinned with
+automatic updates disabled; remote setup-script content matches the reviewed local
+script. The actual `v1.0.5` demo failed: its first recorded shell attempt could not
+find `/tmp/interlock/replay.py`, and its final reply failed the frozen diagnostic
+hash check. The pinned root reached `DONE` and the runtime was later `DESTROYED`,
+but no valid worker report was accepted. The app marked the investigation failed,
+kept the agent contained and did not run Qwen advisory analysis. Qwen's HTTP
+connection was verified separately; 24 demo audit events reached ClickHouse with
+pending outbox count zero. The setup/runtime fix has not succeeded. CLI
+setup/diagnostics are not the application execution transport.
 
 ### ClickHouse
 

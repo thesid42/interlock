@@ -168,20 +168,24 @@ class InvestigationWorker:
                 result["error"] = "Awaiting API-verified terminal status for the exact root task"
             deadline = previous.get("deadline")
             if deadline and deadline < now() and result["state"] == "pending":
-                result.update({"state": "deadline_expired", "operator_action_required": True,
-                               "remote_termination_verified": False,
-                               "error": "Polling deadline reached; hosted execution may continue. End this exact session in Guild UI and reconcile before rerun."})
-            state = "waiting_sandbox" if result["state"] == "pending" else "incomplete" if result["state"] == "reported" else "reconciliation_required" if result["state"] == "deadline_expired" else result["state"]
+                if result.get("remote_terminal_verified") is True:
+                    result.update({"state": "failed", "operator_action_required": True,
+                                   "error": "Guild root task is terminal, but required bound replay or isolation evidence was unavailable before the polling deadline. Review this exact session; no automatic rerun."})
+                else:
+                    result.update({"state": "deadline_expired", "operator_action_required": True,
+                                   "remote_termination_verified": False,
+                                   "error": "Polling deadline reached; hosted execution may continue. End this exact session in Guild UI and reconcile before rerun."})
+            state = "waiting_sandbox" if result["state"] == "pending" else "review_required" if result["state"] == "reported" else "reconciliation_required" if result["state"] == "deadline_expired" else result["state"]
             qwen = investigation.get("qwen")
             guild = {"state": result["state"], "session_id": previous["session_id"], "advisory_only": True,
                      "isolation_verified": result.get("isolation_verified", False),
                      "replay_execution_verified": result.get("replay_execution_verified", False), "runtimes": result.get("runtimes", []),
-                     "replies": [{"state": "reported" if state == "incomplete" else "validated", "advisory_only": True, "result": result.get("result")}] if state in {"completed", "incomplete"} else []}
-            if state in {"completed", "incomplete"}:
+                     "replies": [{"state": "reported" if state == "review_required" else "validated", "advisory_only": True, "result": result.get("result")}] if state in {"completed", "review_required"} else []}
+            if state in {"completed", "review_required"}:
                 qwen = model.advisory(self.inference, self.settings.judge_model or self.settings.agent_model,
                                       incident["snapshot"], result)
                 qwen["replay_execution_verified"] = result.get("replay_execution_verified", False)
-                if state == "incomplete":
+                if state == "review_required":
                     qwen["limitation"] = "Hypothesis only: hosted worker execution is not independently verified; root cause is not established"
             elif state in {"failed", "reconciliation_required"}:
                 qwen = {"state": "not_run", "advisory_only": True, "error": "Hosted investigation failed; no verified execution evidence is available"}

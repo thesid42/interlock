@@ -11,3 +11,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+integrations/guild/incident-investigator/.guild/

@@ -102,12 +102,11 @@ export default function OperationsView({ health, onConnections }: { health: Heal
   const readiness = data?.readiness ?? health?.integrations;
   const inference = readiness?.inference ?? readiness?.akash ?? health?.integrations?.akash;
   const configured = inference?.configured;
-  const publicInference = inference?.transport === 'http' || inference?.public_data_only;
 
   return <>
     <div className="page-heading"><div className="heading-title"><h1>Agent security operations</h1><span className="plain-meta"><span className={`status-dot ${data && !pollError ? 'online' : ''}`} />{data && !pollError ? 'Connected' : 'Connecting'}</span></div><div className="page-toolbar"><button className="secondary-button" onClick={() => void demo()} disabled={Boolean(busy)} title="Create a recorded, controlled incident"><FlaskConical size={15} />Controlled incident</button><button className="primary-button" onClick={() => { setError(''); dialog.current?.showModal(); }}><Plus size={15} />New agent</button></div></div>
     {pollError && <ErrorNotice>{pollError}</ErrorNotice>}{error && !dialog.current?.open && <ErrorNotice>{error}</ErrorNotice>}
-    {inference && (!configured || publicInference) && <div className="readiness-strip"><Plug size={16} />{!configured && <span>Akash Console inference: not configured</span>}{publicInference && <span>Akash Console: public/synthetic demo data only; HTTP is unencrypted</span>}<button className="inline-command" onClick={onConnections}>Connections<ArrowRight size={14} /></button></div>}
+    {inference && !configured && <div className="readiness-strip"><Plug size={16} /><span>Akash Console inference: not configured</span><button className="inline-command" onClick={onConnections}>Connections<ArrowRight size={14} /></button></div>}
     <section className="metric-band operations-metrics" aria-label="Operations totals">{[
       ['Active agents', counts?.agents_active, 'success'], ['Contained agents', counts?.agents_contained, 'danger'], ['Open incidents', counts?.incidents_open, 'warning'], ['Published briefs', counts?.briefs, ''],
     ].map(([name, value, tone]) => <div className="metric" key={String(name)}><span>{name}</span><strong className={String(tone)}>{typeof value === 'number' ? value : '--'}</strong></div>)}</section>

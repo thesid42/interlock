@@ -157,10 +157,12 @@ class SecurityOperations(InvestigationWorker):
         with self.store.transaction() as db:
             self._incident(db, incident_id)
             row = db.execute("SELECT * FROM security_investigations WHERE incident_id=?", (incident_id,)).fetchone()
-            if row and row["state"] in {"queued", "running", "waiting_sandbox", "uncertain", "reconciliation_required"}:
+            if row and row["state"] in {"queued", "running", "waiting_sandbox"}:
                 return self._incident(db, incident_id)
             previous = decode(row) if row else None
             sandbox = (previous.get("sandbox") or {}) if previous else {}
+            if row and row["state"] in {"uncertain", "reconciliation_required"} and sandbox.get("remote_terminal_verified") is not True:
+                return self._incident(db, incident_id)
             if sandbox.get("session_id") and sandbox.get("remote_terminal_verified") is not True:
                 raise ValueError("Existing Guild session has no verified terminal status; end and reconcile it before another investigation")
             if sandbox.get("session_id"):
