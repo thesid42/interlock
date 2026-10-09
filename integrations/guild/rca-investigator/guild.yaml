@@ -1,0 +1,9 @@
+integrations:
+  - name: siddharthbhat44~interlock-qwen
+    version: 1.0.2
+    tools:
+      - interlock_qwen_complete
+builtins:
+  - name: console
+    tools:
+      - console_log
