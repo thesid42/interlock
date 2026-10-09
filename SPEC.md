@@ -125,6 +125,16 @@ session isolation. A chat response or model-produced JSON cannot attest a contai
 Missing runtime evidence is unavailable isolation, not a successful sandbox.
 See [Guild environments](https://docs.guild.ai/platform/environments).
 
+Bind source configuration and executed runtime in separate stages. Before creating
+a session, check the pinned installed committed agent version, disabled automatic
+updates and its saved `guild.yaml` qualified environment declaration. The live
+version record does not expose `runtime_environment_id`; do not reject a correct
+version solely for that absent field or invent its value. Resolve the expected
+environment/image record IDs through actual Guild metadata. After dispatch,
+require the session runtime's exact environment UUID, image ID and session lock,
+and the root task's exact pinned agent version. A declared environment name alone
+does not establish those execution-time bindings.
+
 Qwen remains on the user's Akash deployment, called by the trusted backend. Its
 bounded diagnostic proposals are frozen for replay in Guild. Guild's built-in
 provider list does not document custom Akash endpoint routing; do not assume setting
@@ -210,6 +220,8 @@ account or Akash Console management credential is needed.
 LLM_PROVIDER=akash_console
 LLM_BASE_URL=https://your-inference-endpoint/v1
 LLM_API_KEY=your-inference-service-key
+LLM_ALLOW_UNAUTHENTICATED=false
+LLM_HTTP_PUBLIC_ONLY=false
 AGENT_MODEL=Qwen/Qwen3.8-27B
 JUDGE_MODEL=Qwen/Qwen3.8-27B
 ```
@@ -220,7 +232,17 @@ responses and validate final JSON/evidence references on the application side.
 Keep raw reasoning out of trusted memory. Same-model review is correlated
 self-review, not independent authorization or a safety proof.
 
-Require HTTPS/authentication and protect other inference-server routes separately.
+Use HTTPS/authentication for normal product operation and protect other
+inference-server routes separately. An operator may explicitly enable
+`LLM_ALLOW_UNAUTHENTICATED` for a service without bearer authentication. The
+separate `LLM_HTTP_PUBLIC_ONLY` development mode permits the user's confirmed
+HTTP service only for bounded public-source or synthetic prompts. It excludes
+operator missions, private memory, draft bodies, raw destinations, and credentials;
+legacy private-context flows must fail closed. Never send a bearer key over HTTP.
+Accept a service root, `/v1` base, or exact `/v1/chat/completions` URL and derive
+the known model-discovery and Chat Completions routes structurally. Strip only
+a bounded recognized Qwen reasoning preamble, then require a complete validated
+JSON object; do not recover arbitrary JSON fragments from prose or truncated output.
 Console management APIs are not inference APIs. Record redacted deployment/model
 details and actual latency/returned usage. Do not infer latency or GPU requirements
 from model marketing. See [Qwen serving](https://huggingface.co/Qwen/Qwen3.8-27B),
@@ -260,9 +282,43 @@ or final model JSON alone cannot verify execution of the reviewed replay worker.
 Account API keys and trigger-only keys differ. Use the complete account key
 ID/secret with necessary `sessions:write`, `workspaces:read` and `agents:read`
 scopes. A successful workspace check is not a completed hosted investigation.
+The live account identity endpoint returns `permissions` as `{group, access}`
+objects, not the rendered documentation's former `scopes` string array. Validate
+the actual response contract. Authentication can be checked before investigator
+IDs are supplied; metadata discovery is read-only and never creates or runs agents.
+Pin `GUILD_SANDBOX_ENVIRONMENT_ID` to the resolved environment record UUID and
+`GUILD_SANDBOX_IMAGE_ID` to the actual image record. Validate the pinned version's
+qualified environment name by reading its saved `guild.yaml` through
+`GET /versions/{id}/code`. That endpoint returns a list of `{path, content}` files;
+bound the payload and reject malformed/duplicate paths before parsing the source.
+The committed version metadata does not include an environment UUID. Independently
+compare the session runtime's environment UUID and image ID with the configured
+records. Source declaration validation and actual runtime binding are distinct;
+a shared base-image ID alone cannot prove the intended setup or worker ran.
 Session creation may succeed remotely before a response is lost: mark ambiguous
 creation uncertain and reconcile when supported, rather than blindly retrying.
 See [Guild's API contract](https://docs.guild.ai/api-reference/introduction).
+
+Account setup recorded on 2026-10-09 includes an internal published investigator
+`v1.0.0`, installation in the dedicated workspace, disabled automatic updates
+confirmed by readback, and environment/image IDs resolved through Guild's official
+CLI. This records setup metadata only, not a verified hosted replay, exact worker
+execution or complete RCA. An explicitly requested bounded integration check must
+report its actual stages and preserve incomplete execution-evidence limits.
+
+One operator-requested controlled `recorded_demo` integration run on 2026-10-09
+verified local containment and two completed live Qwen diagnostic probes.
+The final ClickHouse check showed eleven actual audit events: ten original events
+plus `security_hosted_session_reconciled`, with pending outbox count zero.
+Guild chat returned HTTP `403` after the session and exported user message were
+persisted. Read-only reconciliation matched the message's exact frozen packet
+hash and incident binding. The session's `root_task` matched its scoped task
+listing, verifying root-task identity on the pinned agent version, but its status
+remained `CREATED`. No runtime or task-to-runtime association was reported;
+hosted execution, isolation and RCA remain unverified.
+The exact provider denial reason is unknown. Retain the existing session and
+failure evidence for manual reconciliation; no automatic retry, replacement
+session or contained-agent resumption is authorized by this partial result.
 
 ### Slack MCP
 

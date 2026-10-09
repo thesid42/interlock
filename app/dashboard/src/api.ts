@@ -25,6 +25,7 @@ export const api = {
   inferenceModels: () => request<DataRecord>('/integrations/inference/models'),
   checkInference: () => request<DataRecord>('/integrations/inference/check', { method: 'POST' }),
   checkGuild: () => request<DataRecord>('/integrations/guild/check', { method: 'POST' }),
+  guildDiscovery: () => request<DataRecord>('/integrations/guild/discovery'),
   checkSandbox: () => request<DataRecord>('/integrations/sandbox/check', { method: 'POST' }),
   slackTools: () => request<DataRecord>('/integrations/slack/tools'),
   checkSlack: () => request<DataRecord>('/integrations/slack/check', { method: 'POST' }),

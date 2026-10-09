@@ -67,6 +67,15 @@ inference endpoint ending in `/v1`, `LLM_API_KEY` to its inference bearer creden
 and `AGENT_MODEL`/`JUDGE_MODEL` to the actual served alias for `Qwen/Qwen3.8-27B`.
 Do not provide the Console deployment-management key.
 
+The client also accepts the service root or its exact `/v1/chat/completions` URL
+and derives the `/v1` base. A service without authentication needs explicit
+`LLM_ALLOW_UNAUTHENTICATED=true`; no empty bearer header is sent. For the user's
+HTTP-only hackathon deployment, `LLM_HTTP_PUBLIC_ONLY=true` restricts inference
+to bounded public-source and synthetic prompts. It omits operator missions,
+private memories, draft bodies, raw destinations and credentials. Legacy
+private-context flows remain blocked; HTTPS is required for normal operation.
+These flags default off in the example environment.
+
 In Connections, discover models and separately check a small inference request.
 Thinking parameters and constrained JSON output depend on your serving engine/build;
 the corresponding switches in `.env.example` are configurable. Final JSON is always
@@ -85,6 +94,14 @@ Set `GUILD_API_KEY` to the complete account `id:secret`, plus the exact
 environment and image IDs from your account. Follow the investigator's setup guide
 for scopes, credential restrictions and version pinning. Legacy simulation Guild
 raw-snapshot export is disabled; use the bounded Operations investigation path.
+
+Connections checks the account key independently of investigator configuration
+and offers read-only workspace/agent/version discovery. The current live identity
+contract exposes `permissions` objects; a missing `scopes` field is not missing
+permissions. Authentication alone never verifies hosted execution. Discovery
+does not publish an agent, install it, or silently select unrelated resources.
+Set `GUILD_SANDBOX_ENVIRONMENT_ID` to the exact pinned runtime environment UUID;
+its qualified display name is not evidence of that identity.
 
 `GUILD_SANDBOX_EVIDENCE_EXPORT_ENABLED` defaults to false. Enable it only for the
 approved bounded payload: public source excerpts, evidence IDs/hashes, canonical

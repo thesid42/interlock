@@ -81,12 +81,13 @@ def create_operations_router(operations, inference, settings, guild, sandbox, sl
 
     @router.post("/integrations/guild/check")
     def check_guild():
-        client = sandbox.guild if sandbox.guild.configured else guild
-        if not client.configured:
-            from app.integrations.common import IntegrationUnavailable
-            raise IntegrationUnavailable("Configure the Guild account key, workspace and published investigator first")
-        client.installed_agents()
-        return {"state": "reachable", "readiness": client.readiness(),
-                "detail": "Workspace access checked; hosted investigation is verified by an actual session."}
+        client = sandbox.guild
+        result = client.authenticate()
+        return {**result, "sandbox": sandbox.readiness()}
+
+    @router.get("/integrations/guild/discovery")
+    def guild_discovery():
+        result = sandbox.guild.discover_metadata()
+        return {**result, "sandbox": sandbox.readiness()}
 
     return router

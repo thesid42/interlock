@@ -1,4 +1,4 @@
 # Set this to the private environment prepared for the investigator before publishing.
-environment: your-account~memguard-incident
+environment: siddharthbhat44~interlock-incident
 # Intentionally no integrations, sub_agents, models, or platform mutation builtins.
 # Guild chooses this runner's own configured model, not our external Akash endpoint.

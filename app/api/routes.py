@@ -16,7 +16,7 @@ def create_router(service, runner, settings, akash, guild, analytics, exporter,
             value["status"] = ("verified" if value["verified"] else
                                "configured" if value["configured"] else "unconfigured")
             return value
-        primary_guild = sandbox.guild if sandbox is not None and sandbox.guild.configured else guild
+        primary_guild = sandbox.guild if sandbox is not None else guild
         integrations = {"akash": status(akash), "guild": status(primary_guild), "clickhouse": status(analytics)}
         if sandbox is not None:
             integrations["sandbox"] = status(sandbox)

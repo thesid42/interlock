@@ -6,8 +6,46 @@ import json
 import re
 from urllib.parse import urlsplit
 
+import yaml
+
 from app.integrations.common import IntegrationError, IntegrationUnavailable
 from app.integrations.guild import GuildClient
+
+
+class _ManifestLoader(yaml.SafeLoader):
+    pass
+
+
+def _unique_mapping(loader, node):
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node)
+        if not isinstance(key, str) or key in result:
+            raise ValueError("Guild manifest contains invalid or duplicate keys")
+        result[key] = loader.construct_object(value_node)
+    return result
+
+
+_ManifestLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
+
+
+def _check_manifest(files, environment):
+    text = files.get("guild.yaml")
+    if not isinstance(text, str) or len(text.encode()) > 16384:
+        raise ValueError("The pinned investigator needs a bounded root guild.yaml")
+    try:
+        if any(getattr(event, "anchor", None) or isinstance(event, yaml.events.AliasEvent)
+               for event in yaml.parse(text)):
+            raise ValueError("Guild manifest aliases are not allowed")
+        manifest = yaml.load(text, Loader=_ManifestLoader)
+    except yaml.YAMLError:
+        raise ValueError("The pinned Guild manifest is not valid YAML") from None
+    if not isinstance(manifest, dict) or manifest.get("environment") != environment:
+        raise ValueError("The pinned manifest must declare the exact configured Guild environment name")
+    if set(manifest) - {"environment", "integrations", "sub_agents", "builtins", "models"}:
+        raise ValueError("The investigator manifest declares unsupported configuration")
+    if any(manifest.get(key) not in (None, []) for key in ("integrations", "sub_agents", "builtins", "models")):
+        raise ValueError("The investigator manifest must not declare extra tools, agents or models")
 
 
 def _identifier(value) -> str:
@@ -34,25 +72,51 @@ class IncidentSandbox:
         self._setup_verified = False
         self._runtime_verified = False
         self._workspace_id = None
+        self._environment_id = None
         self._detail = "Configure and publish the dedicated Guild Goose investigator"
 
     def readiness(self) -> dict:
-        configured = bool(self.settings.sandbox_enabled and self.guild.configured
-            and self.settings.guild_sandbox_agent_version_id
-            and self.settings.guild_sandbox_environment and self.settings.guild_sandbox_image_id)
+        required = {"GUILD_API_KEY": self.guild.api_key,
+                    "GUILD_TRIGGER_API_KEY": self.guild.trigger_api_key,
+                    "GUILD_TRIGGER_ID": self.guild.trigger_id,
+                    "GUILD_SANDBOX_WORKSPACE_ID": self.settings.guild_sandbox_workspace_id,
+                    "GUILD_SANDBOX_AGENT_ID": self.settings.guild_sandbox_agent_id,
+                    "GUILD_SANDBOX_AGENT_VERSION_ID": self.settings.guild_sandbox_agent_version_id,
+                    "GUILD_SANDBOX_ENVIRONMENT": self.settings.guild_sandbox_environment,
+                    "GUILD_SANDBOX_ENVIRONMENT_ID": getattr(self.settings, "guild_sandbox_environment_id", ""),
+                    "GUILD_SANDBOX_IMAGE_ID": self.settings.guild_sandbox_image_id}
+        missing = [name for name, value in required.items() if not value]
+        configured = bool(self.settings.sandbox_enabled and not missing)
+        authentication = self.guild.readiness()
         return {"provider": "guild_sandbox", "configured": configured,
                 "verified": self._runtime_verified, "setup_verified": self._setup_verified,
                 "detail": self._detail, "environment": self.settings.guild_sandbox_environment,
+                "environment_id": getattr(self.settings, "guild_sandbox_environment_id", ""),
+                "key_configured": authentication["key_configured"],
+                "authentication_verified": authentication["authentication_verified"],
+                "permissions_verified": authentication["permissions_verified"],
+                "missing_configuration": missing,
                 "evidence_export_enabled": self.settings.guild_sandbox_evidence_export_enabled,
                 "scope": "sanitized typed reconstruction in a Guild-hosted coding runtime"}
 
     def check(self) -> dict:
         self._setup_verified = False
+        self._environment_id = None
         if not self.readiness()["configured"]:
-            self._detail = "Missing Guild sandbox workspace, agent, pinned version, environment or image IDs"
+            self._runtime_verified = False
+            self._detail = "Missing Guild investigator configuration: " + ", ".join(self.readiness()["missing_configuration"])
+            if not self.settings.sandbox_enabled:
+                self._detail = "Guild sandbox is disabled"
             return self.readiness()
         try:
+            authentication = self.guild.readiness()
+            if not authentication["authentication_verified"]:
+                authentication = self.guild.authenticate()["readiness"]
+            if not authentication["permissions_verified"]:
+                raise ValueError("Guild account key must have agents:read and workspaces:read")
             workspace = self.guild.get_workspace()
+            if workspace.get("owner_id") != authentication["account"]["id"] or workspace.get("archived_at"):
+                raise ValueError("Diagnostic workspace must be active and owned by the authenticated account")
             if workspace.get("restrict_account_credentials") is not True:
                 raise ValueError("Diagnostic workspace must restrict account credential fallback")
             agents = [row for row in self.guild.installed_agents()
@@ -62,14 +126,30 @@ class IncidentSandbox:
             installed = agents[0]
             if installed.get("agent", {}).get("agent_type") != "GOOSE":
                 raise ValueError("A Goose coding-runtime investigator is required, not a native prompt agent")
-            if installed.get("version_id") != self.settings.guild_sandbox_agent_version_id or installed.get("should_autoupdate"):
+            if (installed.get("version_id") != self.settings.guild_sandbox_agent_version_id
+                    or installed.get("should_autoupdate") is not False or installed.get("archived_at")):
                 raise ValueError("Pin the installed investigator version and disable automatic updates")
+            version = self.guild.get_version(self.settings.guild_sandbox_agent_version_id)
+            if (version.get("id") != self.settings.guild_sandbox_agent_version_id
+                    or version.get("agent_id") != self.guild.agent_id
+                    or version.get("validation_status") != "PASSED"
+                    or not isinstance(version.get("published_at"), str) or not version["published_at"]):
+                raise ValueError("The pinned investigator must be its own validated, published agent version")
+            environment_id = getattr(self.settings, "guild_sandbox_environment_id", "")
+            if ("runtime_environment_id" in version
+                    and version["runtime_environment_id"] != environment_id):
+                raise ValueError("The version environment metadata conflicts with the configured Guild environment ID")
+            _check_manifest(self.guild.get_version_code(version["id"]), self.settings.guild_sandbox_environment)
+            if version.get("raw_tools") or version.get("tools"):
+                raise ValueError("The investigator version must not declare integrations, sub-agents or extra platform tools")
             if self.guild.credential_associations(installed["id"]):
                 raise ValueError("The diagnostic investigator must have no service credential associations")
             self._workspace_id = workspace["id"]
+            self._environment_id = environment_id
             self._setup_verified = True
-            self._detail = "Guild setup verified; actual isolated execution is not yet verified"
+            self._detail = "Guild setup and pinned manifest verified; resolved environment and isolated execution still require runtime evidence"
         except (IntegrationError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            self._runtime_verified = False
             self._detail = str(exc) if isinstance(exc, ValueError) else "Guild sandbox setup check failed"
         return self.readiness()
 
@@ -128,12 +208,14 @@ class IncidentSandbox:
         try:
             encoded = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).decode()
             envelope = {"protocol": "memguard-guild-replay-v1", "snapshot_hash": payload["snapshot_hash"],
-                        "worker_command": "python3 -I -B /opt/memguard/replay.py --base64 '" + encoded + "'"}
+                        "worker_command": "python3 -I -B \"${HOME:?HOME must be set}/.local/share/interlock/replay.py\" --base64 '" + encoded + "'"}
             session = self.guild.start_session(json.dumps(envelope, separators=(",", ":")))
         except IntegrationUnavailable as exc:
             return {"state": "unavailable", "result": None, "error": str(exc)}
-        except IntegrationError:
+        except IntegrationError as exc:
             return {"state": "uncertain", "result": None,
+                    "snapshot_hash": payload["snapshot_hash"], "incident_id": payload["incident_id"],
+                    "provider_detail": str(exc),
                     "error": "Guild session creation outcome is uncertain; reconcile before retrying"}
         return {"state": "started", "session_id": session["id"], "snapshot_hash": payload["snapshot_hash"],
                 "incident_id": payload["incident_id"], "result": None, "error": None,
@@ -143,6 +225,8 @@ class IncidentSandbox:
              expected_snapshot_hash: str | None = None, incident_id: str | None = None) -> dict:
         base = {"session_id": session_id, "result": None, "error": None,
                 "isolation_verified": False, "replay_execution_verified": False,
+                "session_runtime_verified": False, "root_task_verified": False,
+                "root_runtime_binding_verified": False,
                 "remote_terminal_verified": False, "root_task_id": None, "root_task_status": None,
                 "next_cursor": from_id, "has_more": False, "runtimes": [], "events": []}
         if not expected_snapshot_hash or not re.fullmatch(r"[a-f0-9]{64}", expected_snapshot_hash) or not incident_id:
@@ -150,17 +234,14 @@ class IncidentSandbox:
         if not self.settings.guild_sandbox_evidence_export_enabled or not self.check()["setup_verified"]:
             return {**base, "state": "failed", "error": "Guild sandbox consent or pinned setup is no longer valid"}
         try:
-            page = self.guild.poll(session_id, from_id)
             session = self.guild.get_session(session_id)
             runtimes = self.guild.fetch_runtimes(session_id)
             tasks = self.guild.fetch_tasks(session_id)
         except IntegrationError:
             return {**base, "state": "pending", "error": "Guild evidence polling failed; existing session was not restarted"}
-        base.update(next_cursor=page["next_cursor"], has_more=page["has_more"],
-                    events=[{"id": event.get("id"), "type": event.get("type"),
-                             "task_id": event.get("task_id")} for event in page.get("events", [])],
-                    runtimes=runtimes, tasks=tasks)
-        if session.get("workspace_id") != self._workspace_id or session.get("interrupted_at"):
+        base.update(runtimes=runtimes, tasks=tasks)
+        if (session.get("id") != session_id or session.get("workspace_id") != self._workspace_id
+                or session.get("interrupted_at")):
             return {**base, "state": "failed", "error": "Guild session was interrupted or belongs to another workspace"}
         def image_matches(row):
             image = row.get("image")
@@ -168,17 +249,39 @@ class IncidentSandbox:
             return value == self.settings.guild_sandbox_image_id
         isolated = [row for row in runtimes if row.get("id")
                     and row.get("workspace_id") == self._workspace_id
+                    and row.get("runtime_environment_id") == self._environment_id
                     and row.get("locked_for_session_id") == session_id and image_matches(row)]
         runtime_ids = {row["id"] for row in isolated}
-        root_tasks = [task for task in tasks if task.get("session_id") == session_id
+        # The live scoped task list omits session/runtime IDs; bind its root to the session's own reference.
+        reference = session.get("root_task")
+        reference = reference if isinstance(reference, dict) else {}
+        root_tasks = [task for task in tasks if isinstance(reference.get("id"), str)
+                      and task.get("id") == reference["id"]
+                      and ("session_id" not in task or task["session_id"] == session_id)
                       and "parent_task_id" in task and task["parent_task_id"] is None
-                      and task.get("version_id") == self.settings.guild_sandbox_agent_version_id]
+                      and task.get("version_id") == self.settings.guild_sandbox_agent_version_id
+                      and isinstance(reference.get("status"), str)
+                      and task.get("status") == reference["status"]]
         root = root_tasks[0] if len(root_tasks) == 1 else None
         actual_tasks = [root] if root and root.get("runtime_id") in runtime_ids else []
         if root:
             base.update(root_task_id=root.get("id"), root_task_status=root.get("status"),
+                        root_task_verified=True,
                         remote_terminal_verified=root.get("status") in {"DONE", "ERROR", "INTERRUPTED"})
+        base["session_runtime_verified"] = bool(isolated)
+        base["root_runtime_binding_verified"] = bool(actual_tasks)
         base["isolation_verified"] = bool(isolated and actual_tasks)
+        if root and root.get("status") in {"ERROR", "INTERRUPTED"}:
+            return {**base, "state": "failed", "error": "Guild investigation reported a runtime error or interruption"}
+        if root and root.get("status") == "CREATED" and not runtimes:
+            return {**base, "state": "pending", "error": "Guild root task exists; awaiting runtime startup"}
+        try:
+            page = self.guild.poll(session_id, from_id)
+        except IntegrationError:
+            return {**base, "state": "pending", "error": "Guild event polling failed; existing session was not restarted"}
+        base.update(next_cursor=page["next_cursor"], has_more=page["has_more"],
+                    events=[{"id": event.get("id"), "type": event.get("type"),
+                             "task_id": event.get("task_id")} for event in page.get("events", [])])
         if not page.get("replies") and root and root.get("status") == "DONE":
             try:
                 completed = self.guild.poll(session_id, event_types="runtime_done")

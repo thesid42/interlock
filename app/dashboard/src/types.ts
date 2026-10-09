@@ -6,7 +6,26 @@ export interface Integration {
   status: string;
   error?: string;
   message?: string;
+  detail?: string;
   details?: DataRecord;
+  key_configured?: boolean;
+  authentication_verified?: boolean;
+  permissions_verified?: boolean;
+  missing_permissions?: string[];
+  missing_configuration?: string[];
+  account?: DataRecord | null;
+  discovery_available?: boolean;
+  setup_verified?: boolean;
+  evidence_export_enabled?: boolean;
+  transport?: 'https' | 'http';
+  public_data_only?: boolean;
+  authentication?: 'bearer' | 'none';
+  models_discovered?: boolean;
+  discovered_models?: string[];
+  inference_verified?: boolean;
+  requested_model?: string;
+  served_model?: string | null;
+  model_identity_match?: boolean | null;
 }
 
 export interface Health {

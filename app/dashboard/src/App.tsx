@@ -82,8 +82,23 @@ export default function App() {
       <header className="topbar"><div className="breadcrumb"><strong className="product-name">Interlock</strong><span className="header-context">Workspace</span><ChevronRight size={14} /><span className="current-view">{views.find((item) => item.id === view)?.name}</span></div><div className="topbar-actions">
         <details className="integration-menu"><summary className="integration-trigger" title="Sponsor integrations" aria-label="Sponsor integrations"><Plug size={16} /><span>Integrations</span><ChevronDown size={13} /></summary><div className="integration-popover"><div className="popover-heading">Connections</div>{['akash', 'clickhouse', 'guild', 'sandbox', 'slack'].map((name) => {
         const integration = health?.integrations?.[name];
-        const status = !integration ? (loading ? 'Connecting' : 'Unavailable') : integration.verified ? 'Verified' : integration.configured ? 'Configured, unverified' : 'Not configured';
-        return <div className="integration" key={name} title={integration ? label(integration.status) : status}><span className={`status-dot ${integration?.verified ? 'online' : integration?.configured ? 'pending' : ''}`} /><div><strong>{name === 'akash' ? 'Akash Console' : name === 'guild' ? 'Guild' : name === 'clickhouse' ? 'ClickHouse' : name === 'slack' ? 'Slack MCP' : 'Investigation sandbox'}</strong><span>{status}</span></div></div>;
+        let status = !integration ? (loading ? 'Connecting' : 'Unavailable') : integration.verified ? 'Verified' : integration.configured ? 'Configured, unverified' : 'Not configured';
+        let verified = integration?.verified === true;
+        let pending = integration?.configured === true;
+        if (integration && name === 'akash') {
+          const publicOnly = integration.transport === 'http' || integration.public_data_only;
+          verified = integration.inference_verified === true && !publicOnly;
+          pending = integration.configured || integration.models_discovered === true || Boolean(publicOnly);
+          status = publicOnly ? integration.inference_verified ? 'Inference verified; public HTTP demo only' : 'Public HTTP demo; inference unverified' : integration.inference_verified ? 'Inference verified' : integration.models_discovered ? 'Models discovered; inference unverified' : integration.configured ? 'Configured, inference unverified' : 'Not configured';
+        } else if (integration && name === 'guild') {
+          verified = integration.authentication_verified === true && integration.configured && integration.permissions_verified === true;
+          pending = integration.key_configured === true || integration.authentication_verified === true || integration.configured;
+          status = integration.authentication_verified ? integration.configured ? 'Authenticated' : 'Authenticated; investigator unconfigured' : integration.key_configured ? 'Key present, authentication unverified' : 'Not configured';
+        } else if (integration && name === 'sandbox') {
+          status = integration.verified ? 'Runtime metadata verified' : integration.setup_verified ? 'Setup verified; runtime unverified' : integration.configured ? 'Configured, setup unverified' : 'Not configured';
+          pending = integration.configured || integration.setup_verified === true;
+        }
+        return <div className="integration" key={name} title={integration ? integration.detail ?? label(integration.status) : status}><span className={`status-dot ${verified ? 'online' : pending ? 'pending' : ''}`} /><div><strong>{name === 'akash' ? 'Akash Console' : name === 'guild' ? 'Guild' : name === 'clickhouse' ? 'ClickHouse' : name === 'slack' ? 'Slack MCP' : 'Investigation sandbox'}</strong><span>{status}</span></div></div>;
       })}<button className="popover-open" onClick={() => setView('connections')}>Open connections<ChevronRight size={14} /></button></div></details>
         <button className="icon-button theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
         <button className="icon-button" onClick={() => void refresh()} disabled={loading} title="Refresh workspace" aria-label="Refresh workspace"><RefreshCw size={17} className={loading ? 'spin' : ''} /></button>

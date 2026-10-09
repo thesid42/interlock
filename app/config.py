@@ -19,6 +19,8 @@ class Settings:
     llm_provider: str = "akash_console"
     llm_base_url: str = ""
     llm_api_key: str = ""
+    llm_allow_unauthenticated: bool = False
+    llm_http_public_only: bool = False
     agent_model: str = "Qwen/Qwen3.8-27B"
     judge_model: str = "Qwen/Qwen3.8-27B"
     llm_timeout_seconds: float = 30.0
@@ -37,6 +39,7 @@ class Settings:
     guild_sandbox_agent_id: str = ""
     guild_sandbox_agent_version_id: str = ""
     guild_sandbox_environment: str = ""
+    guild_sandbox_environment_id: str = ""
     guild_sandbox_image_id: str = ""
     guild_sandbox_timeout_seconds: float = 180.0
     slack_mcp_access_token: str = ""
@@ -55,6 +58,8 @@ class Settings:
     clickhouse_secure: bool = True
     guild_base_url: str = "https://api.guild.ai/v1"
     guild_api_key: str = ""
+    guild_trigger_api_key: str = ""
+    guild_trigger_id: str = ""
     guild_workspace_id: str = ""
     guild_agent_id: str = ""
 
@@ -69,6 +74,8 @@ class Settings:
             llm_provider=os.getenv("LLM_PROVIDER", cls.llm_provider),
             llm_base_url=os.getenv("LLM_BASE_URL", cls.llm_base_url),
             llm_api_key=os.getenv("LLM_API_KEY", ""),
+            llm_allow_unauthenticated=_boolean("LLM_ALLOW_UNAUTHENTICATED"),
+            llm_http_public_only=_boolean("LLM_HTTP_PUBLIC_ONLY"),
             agent_model=os.getenv("AGENT_MODEL", cls.agent_model),
             judge_model=os.getenv("JUDGE_MODEL", cls.judge_model),
             llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
@@ -88,6 +95,7 @@ class Settings:
             guild_sandbox_agent_id=os.getenv("GUILD_SANDBOX_AGENT_ID", ""),
             guild_sandbox_agent_version_id=os.getenv("GUILD_SANDBOX_AGENT_VERSION_ID", ""),
             guild_sandbox_environment=os.getenv("GUILD_SANDBOX_ENVIRONMENT", ""),
+            guild_sandbox_environment_id=os.getenv("GUILD_SANDBOX_ENVIRONMENT_ID", ""),
             guild_sandbox_image_id=os.getenv("GUILD_SANDBOX_IMAGE_ID", ""),
             guild_sandbox_timeout_seconds=min(600.0, max(30.0, float(os.getenv("GUILD_SANDBOX_TIMEOUT_SECONDS", "180")))),
             slack_mcp_access_token=os.getenv("SLACK_MCP_ACCESS_TOKEN", ""),
@@ -106,6 +114,8 @@ class Settings:
             clickhouse_secure=_boolean("CLICKHOUSE_SECURE", True),
             guild_base_url=os.getenv("GUILD_BASE_URL", cls.guild_base_url),
             guild_api_key=os.getenv("GUILD_API_KEY", ""),
+            guild_trigger_api_key=os.getenv("GUILD_TRIGGER_API_KEY", ""),
+            guild_trigger_id=os.getenv("GUILD_TRIGGER_ID", ""),
             guild_workspace_id=os.getenv("GUILD_WORKSPACE_ID", ""),
             guild_agent_id=os.getenv("GUILD_AGENT_ID", ""),
         )
