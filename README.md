@@ -18,8 +18,8 @@ product name and remain unchanged.
   cited in-app briefs using the user's Akash-hosted Qwen deployment.
 - Deterministic tool/destination checks, pre-dispatch containment, frozen incident
   snapshots, provenance restrictions and explicit resolution/resumption.
-- Asynchronous Guild sandbox integration, bounded diagnostic proposals and advisory
-  RCA, with runtime evidence distinct from model-generated claims.
+- Asynchronous Guild Python investigator, bounded repeated agent reruns, functional
+  canary tools and advisory RCA, with runtime evidence distinct from model claims.
 - ClickHouse event outbox, acknowledged export, timelines, source rankings and
   analytics. SQLite remains authoritative when analytics is unavailable.
 - Optional official Slack MCP delivery with fixed channel and pinned tool schema.
@@ -83,16 +83,21 @@ validated locally. Qwen proposes actions but never grants execution permissions.
 
 ### Guild-hosted sandbox
 
-No local Docker daemon is needed for investigation. Prepare a dedicated private
-workspace, a reviewed coding-agent environment and the pinned published investigator
-under [integrations/guild](integrations/guild). Use a supported Guild inference provider
-for its host agent; do not assume Guild routes a model alias to your Akash endpoint.
-The backend uses your Akash Qwen to produce frozen typed diagnostic cases.
+No local Docker daemon is needed. The intended protocol-v2 investigator is the
+committed Python LangGraph agent under
+[integrations/guild/rca-investigator](integrations/guild/rca-investigator), with no
+custom environment. It reuses the live agent contract, makes fresh external Qwen
+requests through one restricted Guild-mediated integration and dispatches functional
+in-memory tool stubs. It does not ask Goose to generate or transcribe shell commands.
 
 Set `GUILD_API_KEY` to the complete account `id:secret` for `agents:read` and
 `workspaces:read` metadata checks, plus the exact
-`GUILD_SANDBOX_WORKSPACE_ID`, `GUILD_SANDBOX_AGENT_ID`, installed version,
-environment and image IDs from your account. Follow the investigator's setup guide
+`GUILD_SANDBOX_WORKSPACE_ID`, `GUILD_SANDBOX_AGENT_ID` and installed version
+from your account. Select `GUILD_SANDBOX_PROTOCOL_VERSION=2` only with the reviewed
+Python investigator. Set its exact `GUILD_SANDBOX_QWEN_INTEGRATION` qualified name and
+`GUILD_SANDBOX_QWEN_CREDENTIAL_ID` for the dedicated nonsecret public-demo marker.
+Permit only that association, its bounded Qwen operation and `console_log` report
+delivery; no publishing or extra service credentials. Follow the setup guide
 for scopes, credential restrictions and version pinning. Legacy simulation Guild
 raw-snapshot export is disabled; use the bounded Operations investigation path.
 
@@ -110,55 +115,41 @@ and offers read-only workspace/agent/version discovery. The current live identit
 contract exposes `permissions` objects; a missing `scopes` field is not missing
 permissions. Authentication alone never verifies hosted execution. Discovery
 does not publish an agent, install it, or silently select unrelated resources.
-Set `GUILD_SANDBOX_ENVIRONMENT_ID` to the exact pinned runtime environment UUID;
-its qualified display name is not evidence of that identity.
+Environment/image fields apply only to legacy Goose protocol v1; v2 does not require
+an environment template or filesystem-installed replay worker.
 
 `GUILD_SANDBOX_EVIDENCE_EXPORT_ENABLED` defaults to false. Enable it only for the
-approved bounded payload: public source excerpts, evidence IDs/hashes, canonical
-policy/action checks and canary cases. Private memory, mission, draft bodies,
+approved bounded payload: public/synthetic effective prompts, source IDs/hashes,
+canonical policy/action checks and canary cases. The v2 packet preserves up to four
+already-sanitized source rows of 4,000 characters for request fidelity. Private
+memory, operator mission, original draft bodies,
 arbitrary destinations and credentials are excluded. The user's consent covers
 this bounded payload, not unrestricted production data export.
 
-A successful chat is not proof of a sandbox. Interlock records session/runtime IDs
-and requires matching session-lock, environment, image and root-task evidence before
-claiming isolation. Runtime creator/root-task linkage is provenance, not a session
-lock. A valid report bound to the incident/hash and exact terminal `DONE` root task
-can be retained as `reported` even when runtime attestation is unavailable. The
-investigation finishes as `review_required`; missing isolation and worker-execution
-flags stay false, and Qwen's follow-up is advisory only. Manual review is required
-and the managed agent stays contained. Guild results cannot resume agents.
+Interlock captures the effective model request before inference and persists the
+complete frozen experiment packet before dispatch. V2 runs original input, one-source
+removal and neutral replacement twice each, at most six model calls. Old, private or
+incompatible checkpoints become explicitly `reconstruction_not_exact` public inputs.
+The controlled demo is not an exact observed attack, and the attack need not reproduce.
+Independent memory is not supplied by this workload; memory-removal controls are N/A.
 
-The environment setup checks Python and the reviewed worker's pinned SHA-256,
-passes a synthetic self-check, then atomically installs `/tmp/interlock/replay.py`
-with file mode `0444` and directory mode `0755`. It does not consume incident data.
-The backend checks its local source hash and sends only a short fixed
-`python3 -I -B -c` bootstrap that reads this path, verifies the hash and executes
-the worker. Bounded evidence is a separate base64 argument, not generated code;
-the full worker source is not sent per request. No runtime-home path or download
-is required. File permissions and hash checks are not execution attestation.
-
-The Goose recipe requests a fixed command but does not enforce a shell allowlist.
-Do not treat its instructions as a security boundary. The public task API cannot
-authenticate the exact worker command; a model report is not verified replay. The
-timeout is a polling deadline, not remote termination. A verified terminal root
+Pinned source/report verification, root `DONE` and API-confirmed automatic runtime
+cleanup remain separate from container isolation attestation. A validated report with
+confirmed cleanup finishes `review_required`; missing isolation/execution-attestation
+flags stay false. Qwen's follow-up is advisory only, manual review remains required
+and the agent stays contained. There is no product force-destroy API or automatic rerun.
+The timeout is a polling deadline, not remote termination. A verified terminal root
 with missing evidence fails as evidence-unavailable; an unverified terminal state
 requires reconciliation because provider work may continue. End that exact session
 in Guild when needed and do not blindly start another investigation.
 
-The genuine HTTP API trigger returned `201`. Earlier tasks reported a missing
-runtime worker; a later `v1.0.2` CLI diagnostic resolved the custom environment but
-still lacked that file. These checks do not establish successful replay or RCA.
-An inline worker attempt also failed after Goose altered the static command.
-The current fixed-path `v1.0.5` recipe is published, installed and pinned with
-automatic updates disabled; remote setup-script content matches the reviewed local
-script. The actual `v1.0.5` demo failed: its first recorded shell attempt could not
-find `/tmp/interlock/replay.py`, and its final reply failed the frozen diagnostic
-hash check. The pinned root reached `DONE` and the runtime was later `DESTROYED`,
-but no valid worker report was accepted. The app marked the investigation failed,
-kept the agent contained and did not run Qwen advisory analysis. Qwen's HTTP
-connection was verified separately; 24 demo audit events reached ClickHouse with
-pending outbox count zero. The setup/runtime fix has not succeeded. CLI
-setup/diagnostics are not the application execution transport.
+The legacy Goose demo failed on a missing worker/hash mismatch; containment remained.
+Qwen HTTP connectivity and 24 ClickHouse demo events were verified separately with
+pending outbox count zero. The replacement Python agent is published and its mediated
+Qwen operation returned `200`. A Python probe reached `DONE`, but the driver dropped
+its `AIMessage`; direct `console_log` delivery, root binding and cleanup still await
+verification. No end-to-end v2 success is claimed. CLI is setup/diagnostic tooling only;
+application execution remains HTTP API-trigger based.
 
 ### ClickHouse
 
@@ -221,6 +212,20 @@ uploading an evidence bundle to an unauthorized external destination. The policy
 boundary denies the capability before dispatch, contains the agent, quarantines
 the implicated evidence and opens a frozen incident dossier. No external request
 or real data transfer is performed.
+
+The separate live scripted Qwen demo (`POST /api/operations/demo/live`) makes a real
+completion under a fixed, deliberately compromised-agent prompt. Its synthetic marker
+requests a fake canary proposal to `attacker.invalid`; the normal policy gate blocks
+any forbidden proposal and queues investigation. The exact effective checkpoint is
+retained for source-removal and neutral-replacement controls. This demonstrates
+containment of intentional scripted behavior, not discovery of a Qwen vulnerability.
+Refusal, invalid output or provider failure remains visible without a fabricated attack.
+
+After a bound protocol-2 report, terminal root and verified runtime cleanup, successful
+experiment observations produce an advisory investigation report in Briefs. Partial
+results disclose failed counts; a bound all-error receipt produces an explicitly
+incomplete status report with zero successful reruns and no established root cause. The
+blocked proposal is never published, and the agent remains contained.
 
 Resolve an incident with a reason, then explicitly resume the agent. Resolution
 does not automatically unquarantine source memory or demonstrate safe recovery.

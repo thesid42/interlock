@@ -38,6 +38,9 @@ class Settings:
     guild_sandbox_workspace_id: str = ""
     guild_sandbox_agent_id: str = ""
     guild_sandbox_agent_version_id: str = ""
+    guild_sandbox_protocol_version: int = 1
+    guild_sandbox_qwen_integration: str = "siddharthbhat44~interlock-qwen"
+    guild_sandbox_qwen_credential_id: str = ""
     guild_sandbox_environment: str = ""
     guild_sandbox_environment_id: str = ""
     guild_sandbox_image_id: str = ""
@@ -95,6 +98,9 @@ class Settings:
             guild_sandbox_workspace_id=os.getenv("GUILD_SANDBOX_WORKSPACE_ID", ""),
             guild_sandbox_agent_id=os.getenv("GUILD_SANDBOX_AGENT_ID", ""),
             guild_sandbox_agent_version_id=os.getenv("GUILD_SANDBOX_AGENT_VERSION_ID", ""),
+            guild_sandbox_protocol_version=int(os.getenv("GUILD_SANDBOX_PROTOCOL_VERSION", "1")),
+            guild_sandbox_qwen_integration=os.getenv("GUILD_SANDBOX_QWEN_INTEGRATION", cls.guild_sandbox_qwen_integration),
+            guild_sandbox_qwen_credential_id=os.getenv("GUILD_SANDBOX_QWEN_CREDENTIAL_ID", ""),
             guild_sandbox_environment=os.getenv("GUILD_SANDBOX_ENVIRONMENT", ""),
             guild_sandbox_environment_id=os.getenv("GUILD_SANDBOX_ENVIRONMENT_ID", ""),
             guild_sandbox_image_id=os.getenv("GUILD_SANDBOX_IMAGE_ID", ""),

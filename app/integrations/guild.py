@@ -78,6 +78,7 @@ class GuildClient:
         self.workspace_id = workspace_id if workspace_id is not None else getattr(settings, "guild_workspace_id", "")
         self.agent_id = agent_id if agent_id is not None else getattr(settings, "guild_agent_id", "")
         self.agent_version_id = getattr(settings, "guild_sandbox_agent_version_id", "")
+        self.agent_type = "LANGGRAPH" if getattr(settings, "guild_sandbox_protocol_version", 1) == 2 else "GOOSE"
         self.base_url = (base_url or getattr(settings, "guild_base_url", "https://api.guild.ai/v1")).rstrip("/")
         self.timeout = timeout
         self._client = client
@@ -378,7 +379,7 @@ class GuildClient:
         if (len(installed) != 1 or installed[0].get("archived_at")
                 or not isinstance(installed[0].get("id"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", installed[0]["id"])
-                or installed[0]["agent"].get("agent_type") != "GOOSE"):
+                or installed[0]["agent"].get("agent_type") != self.agent_type):
             raise IntegrationError("Guild trigger requires one active installed investigator")
         if self.agent_version_id and (installed[0].get("version_id") != self.agent_version_id
                 or installed[0].get("should_autoupdate") is not False):
@@ -474,13 +475,33 @@ class GuildClient:
                         "text": json.dumps(item["content"], separators=(",", ":"))}
             for item in events if item.get("type") == "runtime_done"
             and isinstance(item.get("content"), dict)
-            and item["content"].get("protocol_version") == 1 and "text" not in item["content"])
+            and item["content"].get("protocol_version") in {1, 2} and "text" not in item["content"])
         ids = [item["id"] for item in events if isinstance(item.get("id"), str)]
         return {"provider": "guild", "mode": "live", "session_id": conversation_id,
                 "state": "reply_available" if replies else "pending", "replies": replies,
                 "next_cursor": ids[-1] if ids and not terminal_receipt else from_id,
                 "events": [{key: item.get(key) for key in ("id", "type", "task_id", "created_at")}
                            for item in events],
+                "has_more": bool(data.get("pagination", {}).get("has_more", False))}
+
+    def poll_console_report(self, session_id: str) -> dict:
+        data = self._session_request("GET", f"/sessions/{quote(session_id, safe='')}/events",
+            params={"types": "agent_console", "sort_by": "-id", "limit": 10})
+        rows = data.get("items")
+        if not isinstance(rows, list) or len(rows) > 10:
+            raise IntegrationError("Guild returned an invalid bounded console event page")
+        events, replies = [], []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise IntegrationError("Guild returned an invalid console event")
+            row = _normalize_links(row, (("task_id", ("task",)),))
+            if row.get("type") != "agent_console":
+                continue
+            events.append({key: row.get(key) for key in ("id", "type", "task_id", "created_at")})
+            text = row.get("content")
+            if isinstance(text, str) and 1 <= len(text.encode()) <= 100000:
+                replies.append({"event_id": row.get("id"), "task_id": row.get("task_id"), "text": text})
+        return {"events": events, "replies": replies, "next_cursor": None,
                 "has_more": bool(data.get("pagination", {}).get("has_more", False))}
 
     def close(self):

@@ -109,6 +109,10 @@ class IncidentSandbox:
                     "GUILD_SANDBOX_ENVIRONMENT": self.settings.guild_sandbox_environment,
                     "GUILD_SANDBOX_ENVIRONMENT_ID": getattr(self.settings, "guild_sandbox_environment_id", ""),
                     "GUILD_SANDBOX_IMAGE_ID": self.settings.guild_sandbox_image_id}
+        if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2:
+            for key in ("GUILD_SANDBOX_ENVIRONMENT", "GUILD_SANDBOX_ENVIRONMENT_ID", "GUILD_SANDBOX_IMAGE_ID"):
+                required.pop(key)
+            required["GUILD_SANDBOX_QWEN_CREDENTIAL_ID"] = self.settings.guild_sandbox_qwen_credential_id
         return [name for name, value in required.items() if not value]
 
     def readiness(self) -> dict:
@@ -124,7 +128,8 @@ class IncidentSandbox:
                 "permissions_verified": authentication["permissions_verified"],
                 "missing_configuration": missing,
                 "evidence_export_enabled": self.settings.guild_sandbox_evidence_export_enabled,
-                "scope": "sanitized typed reconstruction in a Guild-hosted coding runtime"}
+                "protocol_version": getattr(self.settings, "guild_sandbox_protocol_version", 1),
+                "scope": "bounded Python agent reruns with mediated Qwen and in-memory tools" if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2 else "sanitized typed reconstruction in a Guild-hosted coding runtime"}
 
     def check(self) -> dict:
         self._setup_verified = False
@@ -151,7 +156,8 @@ class IncidentSandbox:
             if len(agents) != 1:
                 raise ValueError("Install the dedicated investigator in the diagnostic workspace")
             installed = agents[0]
-            if installed.get("agent", {}).get("agent_type") != "GOOSE":
+            protocol_v2 = getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2
+            if installed.get("agent", {}).get("agent_type") != ("LANGGRAPH" if protocol_v2 else "GOOSE"):
                 raise ValueError("A Goose coding-runtime investigator is required, not a native prompt agent")
             if (installed.get("version_id") != self.settings.guild_sandbox_agent_version_id
                     or installed.get("should_autoupdate") is not False or installed.get("archived_at")):
@@ -163,6 +169,28 @@ class IncidentSandbox:
                     or not isinstance(version.get("published_at"), str) or not version["published_at"]):
                 raise ValueError("The pinned investigator must be its own validated, published agent version")
             environment_id = getattr(self.settings, "guild_sandbox_environment_id", "")
+            if protocol_v2:
+                from .langgraph import verify_sources
+                files = self.guild.get_version_code(version["id"])
+                verify_sources(files, self.settings)
+                manifest = yaml.load(files["guild.yaml"], Loader=_ManifestLoader)
+                expected = {"integrations": [{"name": self.settings.guild_sandbox_qwen_integration,
+                    "version": "1.0.2", "tools": ["interlock_qwen_complete"]}],
+                    "builtins": [{"name": "console", "tools": ["console_log"]}]}
+                if manifest != expected:
+                    raise ValueError("The Python investigator may declare only the pinned Qwen operation")
+                associations = self.guild.credential_associations(installed["id"])
+                expected_credential = self.settings.guild_sandbox_qwen_credential_id
+                if len(associations) != 1 or not any(
+                    row.get("credentials_id") == expected_credential or row.get("credential_id") == expected_credential or
+                    isinstance(row.get("credentials"), dict) and row["credentials"].get("id") == expected_credential or
+                    isinstance(row.get("credential"), dict) and row["credential"].get("id") == expected_credential
+                    for row in associations):
+                    raise ValueError("Bind only the configured public-demo Qwen marker to the investigator")
+                self._workspace_id = workspace["id"]
+                self._setup_verified = True
+                self._detail = "Pinned Python source and bounded Qwen tool verified; individual runtime isolation is checked separately"
+                return self.readiness()
             if ("runtime_environment_id" in version
                     and version["runtime_environment_id"] != environment_id):
                 raise ValueError("The version environment metadata conflicts with the configured Guild environment ID")
@@ -175,12 +203,15 @@ class IncidentSandbox:
             self._environment_id = environment_id
             self._setup_verified = True
             self._detail = "Guild setup and pinned manifest verified; resolved environment and isolated execution still require runtime evidence"
-        except (IntegrationError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        except (IntegrationError, ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
             self._runtime_verified = False
             self._detail = str(exc) if isinstance(exc, ValueError) else "Guild sandbox setup check failed"
         return self.readiness()
 
     def _payload(self, snapshot: dict) -> dict:
+        if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2:
+            from .langgraph import validate_packet
+            return validate_packet(snapshot)
         sources = []
         for source in snapshot.get("sources", [])[:4]:
             url = urlsplit(str(source.get("url", "")))
@@ -233,8 +264,11 @@ class IncidentSandbox:
         except (KeyError, ValueError, TypeError):
             return {"state": "failed", "result": None, "error": "Snapshot failed sanitized export requirements"}
         try:
-            envelope = {"protocol": "memguard-guild-replay-v1", "snapshot_hash": payload["snapshot_hash"],
-                        "worker_sha256": WORKER_SHA256, "worker_command": _worker_command(payload)}
+            if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2:
+                envelope = payload
+            else:
+                envelope = {"protocol": "memguard-guild-replay-v1", "snapshot_hash": payload["snapshot_hash"],
+                            "worker_sha256": WORKER_SHA256, "worker_command": _worker_command(payload)}
             session = self.guild.start_session(json.dumps(envelope, separators=(",", ":")))
         except IntegrationUnavailable as exc:
             return {"state": "unavailable", "result": None, "error": str(exc)}
@@ -248,7 +282,8 @@ class IncidentSandbox:
                 "isolation_verified": False}
 
     def poll(self, session_id: str, from_id: str | None = None, *,
-             expected_snapshot_hash: str | None = None, incident_id: str | None = None) -> dict:
+             expected_snapshot_hash: str | None = None, incident_id: str | None = None,
+             expected_packet: dict | None = None) -> dict:
         base = {"session_id": session_id, "result": None, "error": None,
                 "poll_warning": None, "poll_retryable": False,
                 "isolation_verified": False, "replay_execution_verified": False,
@@ -268,6 +303,7 @@ class IncidentSandbox:
             return {**base, "state": "pending", "error": None, "poll_retryable": True,
                     "poll_warning": "Guild metadata polling is temporarily delayed; the existing session is preserved and will be checked again"}
         base.update(runtimes=runtimes, tasks=tasks)
+        base["cleanup_verified"] = bool(runtimes) and all(row.get("status") == "DESTROYED" and row.get("destroyed_at") for row in runtimes)
         if (session.get("id") != session_id or session.get("workspace_id") != self._workspace_id
                 or session.get("interrupted_at")):
             return {**base, "state": "failed", "error": "Guild session was interrupted or belongs to another workspace"}
@@ -301,6 +337,8 @@ class IncidentSandbox:
         base["root_runtime_binding_verified"] = bool(actual_tasks)
         base["isolation_verified"] = bool(isolated and actual_tasks)
         if root and root.get("status") in {"ERROR", "INTERRUPTED"}:
+            if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2 and runtimes and not base["cleanup_verified"]:
+                return {**base, "state": "pending", "error": "Guild investigation failed; awaiting runtime destruction before closing the attempt"}
             return {**base, "state": "failed", "error": "Guild investigation reported a runtime error or interruption"}
         if root and root.get("status") == "CREATED" and not runtimes:
             return {**base, "state": "pending", "error": "Guild root task exists; awaiting runtime startup"}
@@ -308,7 +346,10 @@ class IncidentSandbox:
             return {**base, "state": "pending"}
         try:
             if root and root.get("status") == "DONE":
-                page = self.guild.poll(session_id, from_id, event_types="runtime_done")
+                if getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2:
+                    page = self.guild.poll_console_report(session_id)
+                else:
+                    page = self.guild.poll(session_id, from_id, event_types="runtime_done")
             else:
                 page = self.guild.poll(session_id, from_id)
         except IntegrationError:
@@ -322,16 +363,26 @@ class IncidentSandbox:
                     "runtime_error", "system_error", "interrupted"} for event in page.get("events", []))):
             return {**base, "state": "failed", "error": "Guild investigation reported a runtime error or interruption"}
         for reply in page.get("replies", []):
-            if not root or reply.get("task_id") != root.get("id"):
+            protocol_v2 = getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2
+            console_receipt = root and any(task.get("id") == reply.get("task_id")
+                and task.get("parent_task_id") == root.get("id") and task.get("tool_name") == "console_log"
+                and task.get("status") == "DONE" for task in tasks)
+            if not root or (not console_receipt if protocol_v2 else reply.get("task_id") != root.get("id")):
                 continue
             try:
                 text = reply["text"]
-                if len(text) > 32768:
+                if len(text) > 100000:
                     raise ValueError("Oversized reply")
                 result = json.loads(text)
                 if isinstance(result, dict) and result.get("type") == "text" and isinstance(result.get("text"), str):
                     result = json.loads(result["text"])
-                if (not isinstance(result, dict) or result.get("protocol_version") != 1
+                protocol_v2 = getattr(self.settings, "guild_sandbox_protocol_version", 1) == 2
+                if protocol_v2:
+                    from app.security.rca_contract import validate_report
+                    if not expected_packet or expected_packet.get("snapshot_hash") != expected_snapshot_hash or expected_packet.get("incident_id") != incident_id:
+                        raise ValueError("Missing persisted RCA packet")
+                    validate_report(result, packet=expected_packet)
+                elif (not isinstance(result, dict) or result.get("protocol_version") != 1
                         or result.get("incident_id") != incident_id
                         or result.get("snapshot_hash") != expected_snapshot_hash
                         or not isinstance(result.get("observations"), list)
@@ -345,6 +396,14 @@ class IncidentSandbox:
                 return {**base, "state": "failed", "error": "Guild returned an invalid or unbound replay report"}
             result["evidence_kind"] = "hash_bound_report_from_pinned_guild_task"
             result["replay_execution_verified"] = False
+            if protocol_v2:
+                result["evidence_kind"] = "hash_bound_committed_python_experiment_report"
+                base["committed_code_verified"] = True
+                result["limitations"].append("Source bytes, task version and report inputs are API-bound; independent container isolation attestation remains unavailable.")
+                if not base["cleanup_verified"]:
+                    return {**base, "state": "pending", "result": result, "error": "RCA report received; awaiting runtime destruction"}
+                self._detail = "Committed Python RCA report verified and runtime destruction confirmed; independent isolation attestation unavailable"
+                return {**base, "state": "reported", "result": result}
             result["limitations"] = [
                 "Sanitized typed reconstruction, not a clone of the original agent process.",
                 "The session, pinned task version and report hash are API-verified; a final report is not independent proof of shell execution.",

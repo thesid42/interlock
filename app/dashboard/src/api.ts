@@ -22,6 +22,7 @@ export const api = {
   investigateSecurityIncident: (id: string) => request<DataRecord>(`/operations/incidents/${encodeURIComponent(id)}/investigate`, { method: 'POST' }),
   resolveSecurityIncident: (id: string, reason: string) => request<DataRecord>(`/operations/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ reason }) }),
   controlledIncident: () => request<DataRecord>('/operations/demo', { method: 'POST' }),
+  liveAttack: () => request<DataRecord>('/operations/demo/live', { method: 'POST' }),
   inferenceModels: () => request<DataRecord>('/integrations/inference/models'),
   checkInference: () => request<DataRecord>('/integrations/inference/check', { method: 'POST' }),
   checkGuild: () => request<DataRecord>('/integrations/guild/check', { method: 'POST' }),

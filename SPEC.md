@@ -41,7 +41,7 @@ with a three-minute demonstration. They do not require every example action
 |---|---|
 | Autonomy | A backend worker reads registered live sources and runs the approved workflow without repeated browser clicks. |
 | Idea | Detecting and containing actual forbidden agent actions, with inspectable incident evidence and recovery. |
-| Implementation | Durable scheduling, pre-dispatch authorization, containment, frozen snapshots, real isolation and bounded investigations. |
+| Implementation | Durable scheduling, pre-dispatch authorization, containment, frozen snapshots and runtime-evidence checks for bounded investigations. |
 | Tool use | Live Akash-hosted inference and ClickHouse ingestion/queries; Guild session creation verified, but replay currently failed. |
 | Demo | One live legitimate task plus a clearly labeled controlled attack, containment, investigation and legitimate recovery. |
 
@@ -105,93 +105,80 @@ execution permissions are stopped. Assessment-only adapters must say so.
 replica of its incident state. It is not a promise to migrate an arbitrary running
 process bit-for-bit or to make the remote Qwen model itself run inside a container.
 
-Use a Guild-hosted coding-agent runtime for bounded typed-tool replay. Local Docker
-is not required. Guild documents network-isolated coding containers with networked
-setup followed by runtime access through Guild-mediated proxies, not unrestricted
-internet access. This is a provider-documented boundary, not independent attestation
-by Interlock. See [Guild security architecture](https://docs.guild.ai/platform/security-architecture).
+Protocol v2 uses a published, pinned Guild LangGraph Python agent from
+`integrations/guild/rca-investigator`, not an LLM-controlled Goose shell recipe.
+No custom environment or local Docker is required for this path. Before dispatch,
+verify its installed version, disabled automatic updates, committed Python source,
+exact shared contract bytes and minimal manifest. The only declared external tool
+is the pinned private `interlock_qwen_complete` integration; the approved
+`console_log` builtin carries a runner-generated report. There are no production
+publishing tools, other service credentials, sub-agents or application-control rights.
 
-Prepare a dedicated private investigation workspace, reviewed minimal environment,
-and published investigator with no production service integrations or mutation
-authority. Setup must never consume suspect incident content. The runtime receives
-bounded frozen public-source data and a fixed reviewed replay worker, not production credentials
-or a live agent's unrestricted tools. Do not execute model-provided shell commands,
-malicious binaries or downloaded source code in this MVP.
+The live workload and runner share `app/security/rca_contract.py`: prompt generation,
+proposal validation, deterministic policy checks and functional in-memory tool
+adapters. The runner performs actual fresh Qwen proposals and dispatches them to
+those controlled adapters. An allowed publish creates an in-memory artifact and
+returns its hash; forbidden operations return recorded denials. Nothing is published
+to a real sink. No model-generated program or shell command is executed.
 
-The environment setup verifies Python, the reviewed worker's pinned SHA-256 and
-a synthetic result before atomically installing `/tmp/interlock/replay.py` with
-file mode `0444` and directory mode `0755`. Setup never consumes incident data.
-The backend verifies its trusted local `replay.py` source hash and sends only a
-short static `python3 -I -B -c` bootstrap that reads the fixed remote path, checks
-the same hash and executes those bytes. Pass bounded evidence as a separate base64
-data argument, never Python source; do not send the whole worker program per request.
-This avoids runtime-home and model-transcribed worker-source dependencies, not the
-need for environment installation. The worker needs no downloads and performs no
-filesystem writes. File modes, hash checks and Python's `-I`/`-B` options are not
-proof of execution or a replacement for Guild's runtime isolation.
+Qwen remains external on the user's Akash deployment. The trusted backend calls
+it for normal work; the hosted Python agent calls it through the narrowly declared
+Guild-mediated operation. A model alias alone does not configure routing. The current
+private integration uses the confirmed HTTP public-demo endpoint and a nonsecret
+public-demo marker required by its credential setup, not a real bearer secret.
+Private missions, memory, drafts and credentials must never cross that HTTP boundary.
+The operation fixes the model/destination and bounds tokens and request fields;
+it grants no broader network or application capability.
 
-Check documented session runtime records separately from chat connectivity. Record
-session ID, runtime/container IDs, image and status; require the runtime's
-`locked_for_session_id` to match the incident session before claiming exclusive
-session isolation. A chat response or model-produced JSON cannot attest a container.
-Missing runtime evidence is unavailable isolation, not a successful sandbox; it
-does not prevent retaining a separately bound terminal report requiring manual review.
-Runtime creator/root-task association proves provenance only, not an exclusive
-session lock or a custom environment's successful build resolution.
-See [Guild environments](https://docs.guild.ai/platform/environments).
+### Frozen Checkpoint and Controls
 
-Bind source configuration and executed runtime in separate stages. Before creating
-a session, check the pinned installed committed agent version, disabled automatic
-updates and its saved `guild.yaml` qualified environment declaration. The live
-version record does not expose `runtime_environment_id`; do not reject a correct
-version solely for that absent field or invent its value. Resolve the expected
-environment/image record IDs through actual Guild metadata. After dispatch,
-require the session runtime's exact environment UUID, image ID and session lock
-before claiming isolation. Bind every accepted report to the session's exact root
-task and pinned agent version. A declared environment name alone does not establish
-those execution-time bindings.
+Persist the effective messages and request parameters before inference, after any
+HTTP-public-only transformations, then retain returned model metadata. Capture
+source IDs, input scope, contract version/hash and checkpoint hash before containment.
+Freeze and store the full exported packet before creating a hosted session, so returned
+observations can be checked against planned inputs rather than claimed hashes alone.
+Only public/synthetic effective requests are exported. A private, absent or incompatible
+original checkpoint is reconstructed publicly and labeled `reconstruction_not_exact`.
+The current controlled demo is a reconstruction, not an exact observed attack checkpoint.
 
-Qwen remains on the user's Akash deployment, called by the trusted backend. Its
-bounded diagnostic proposals are frozen for replay in Guild. Guild's built-in
-provider list does not document custom Akash endpoint routing; do not assume setting
-a Qwen model name in Guild connects that deployment. A Guild-hosted investigator
-needs a separately configured supported model/provider. See
-[Guild LLM settings](https://docs.guild.ai/platform/llm-settings).
+Use at most three conditions with two repetitions each, for at most six model calls:
 
-### Bounded Investigation
+- Original effective input, or explicitly labeled public reconstruction.
+- Remove one candidate suspect source while retaining the remaining inputs.
+- Replace that same source with a neutral no-facts marker; no other input changes.
 
-- Reconstruct the original typed action against the frozen policy using canary
-  tools/data, not production credentials or destinations.
-- Where implemented and configured, compare a fresh original-context model replay
-  with source-removed or benign-control context under the same mission/policy.
-- Ask Qwen structured questions about the first boundary violation, contributing
-  evidence, alternative explanations, uncertainty and recovery steps.
-- Submit frozen typed cases to the published Guild sandbox investigator and poll
-  the same hosted session; do not create a second session merely for narration.
-- Preserve observations separately from Qwen/Guild advisory findings.
+Keep model parameters and authorization behavior identical across conditions.
+Each run records input hash, changed source IDs, model metadata, proposed action,
+policy decision and actual in-memory tool-call/result trace. Validate those results
+against the shared deterministic adapters. Source selection is a candidate hypothesis,
+not attribution. Independent persistent memory is not currently supplied to the agent,
+so memory-removal controls are not applicable. Repeated differences support behavioral
+hypotheses; variation, refusal and failure remain visible and confidence stays bounded.
+The attack need not reproduce, and non-reproduction is not proof of general safety.
 
-Interrogating the model alone cannot establish root cause. A changed result in a
-bounded counterfactual is supporting evidence, not proof that all unsafe behavior
-has been eliminated. A typed replay is not full arbitrary-code or browser replay.
-Label unsupported probes, missing runtime, model refusal, timeouts and incomplete
-investigations. Never mark "sandboxed" or "RCA complete" from a queued job alone.
+### Report and Runtime Evidence
 
-The shipped Goose recipe requests execution of the fixed worker, but that prompt
-is not a deterministic shell-command allowlist. Containment and credential/egress
-isolation must come from the application boundary and Guild/account configuration,
-not an instruction to behave safely. Stronger command confinement needs a documented
-deterministic hosted runner or restricted tool contract.
+Bind a report to the complete saved packet, checkpoint, incident, exact pinned root
+task and terminal `DONE` status. Verify planned case/repetition counts, intervention
+hashes, functional tool results and recomputed comparisons. A Python probe reached
+`DONE`, but its `AIMessage` was not delivered by the current Guild driver. Direct
+runner reporting through `console_log`, root-event binding and runtime cleanup are
+therefore still being verified; no end-to-end success is claimed.
 
-The current Guild public API can expose runtime and pinned task metadata, but does
-not authenticate the exact replay-worker command. Accept a final JSON report only
-when its incident ID, snapshot hash and bounded observations match the export and
-its event belongs to the exact pinned root task with status `DONE`. Such a report
-is `reported` evidence, not completed RCA. Finish the job as `review_required` even when
-environment/session-lock metadata is missing; keep `isolation_verified=false` for
-missing attestation and `replay_execution_verified=false`. Qwen may provide advisory
-hypotheses with those limitations, not an assertion that isolated execution occurred.
-Manual review remains required and the managed agent stays contained.
-Inspect provider logs manually for corroboration; a model statement is not attestation.
+Record runtime/container IDs and require API-observed destruction before releasing
+a finalized advisory report. Normal Guild runtime cleanup is automatic; the application
+checks its outcome rather than assuming it or using a force-destroy API. Pinned source
+verification, terminal status and cleanup do not independently attest container isolation.
+Guild's documented mediated/network boundaries remain provider claims; absent session-lock
+or isolation metadata stays unknown. See
+[Guild security architecture](https://docs.guild.ai/platform/security-architecture).
+
+A validated terminal report with confirmed cleanup becomes `reported`; the investigation
+finishes `review_required`, not verified RCA. Keep `isolation_verified=false` and
+`replay_execution_verified=false` when independent attestation is unavailable. Qwen's
+follow-up is advisory only, manual review is required and the managed agent stays contained.
+The legacy Goose policy-checker and its failed remote-file setup remain historical,
+not the intended v2 execution path.
 
 The public OpenAPI does not expose a stop/cancel operation. The configured timeout
 is a local polling deadline, not guaranteed remote termination. If it expires
@@ -319,20 +306,21 @@ The live account identity endpoint returns `permissions` as `{group, access}`
 objects, not the rendered documentation's former `scopes` string array. Validate
 the actual response contract. Authentication can be checked before investigator
 IDs are supplied; metadata discovery is read-only and never creates or runs agents.
-Pin `GUILD_SANDBOX_ENVIRONMENT_ID` to the resolved environment record UUID and
-`GUILD_SANDBOX_IMAGE_ID` to the actual image record. Validate the pinned version's
-qualified environment name by reading its saved `guild.yaml` through
+For protocol v2, pin the committed Python source/shared contract and the exact
+Qwen integration/marker association; no custom environment or image IDs are required.
+The manifest permits only that Qwen operation and the approved report-delivery builtin.
+Legacy protocol v1 also pins `GUILD_SANDBOX_ENVIRONMENT_ID` and `GUILD_SANDBOX_IMAGE_ID`.
+Validate the pinned version's saved `guild.yaml` through
 `GET /versions/{id}/code`. That endpoint returns a list of `{path, content}` files;
 bound the payload and reject malformed/duplicate paths before parsing the source.
-The committed version metadata does not include an environment UUID. Independently
-compare the session runtime's environment UUID and image ID with the configured
-records. Source declaration validation and actual runtime binding are distinct;
-a shared base-image ID alone cannot prove the intended setup or worker ran.
+Legacy committed-version metadata may omit an environment UUID. Source validation,
+actual runtime identity, terminal status and cleanup are separate evidence; a shared
+base-image ID alone cannot prove the intended setup or worker ran.
 Session creation may succeed remotely before a response is lost: mark ambiguous
 creation uncertain and reconcile when supported, rather than blindly retrying.
 See [Guild's API contract](https://docs.guild.ai/api-reference/introduction).
 
-Setup checks on 2026-10-09 confirmed investigator publication/installation,
+Historical protocol-v1 checks on 2026-10-09 confirmed publication/installation,
 disabled automatic updates and resolved environment/image IDs. Controlled
 `recorded_demo` checks verified local containment, two live Qwen diagnostic probes
 and eleven reconciled ClickHouse events with pending outbox count zero. Earlier
@@ -343,22 +331,16 @@ custom environment but still reported the missing worker file. Neither proves a
 successful replay, verified isolation or complete RCA; CLI remains setup/diagnostic
 tooling, not application execution transport.
 
-The inline-worker attempt failed after Goose altered the static command. The
-current `environment_setup.sh` instead installs the fixed worker at
-`/tmp/interlock/replay.py` after its hash and synthetic checks; each incident request
-carries only a short hash-checking bootstrap plus separate evidence. Its `v1.0.5`
-version is published, installed and pinned with automatic updates disabled, confirmed
-through CLI readback. The remote setup-script content matches the reviewed local
-script, but the actual `v1.0.5` demo failed: its first recorded Goose shell attempt
-raised `FileNotFoundError` for `/tmp/interlock/replay.py` despite correct CLI
-environment metadata. Its final reply failed with `Frozen diagnostic hash did not match`.
-Public API metadata confirmed the exact pinned root `DONE` at `22:17:54Z` and the
-runtime `DESTROYED` at `22:18:24Z`; neither is successful replay or attestation.
-The application marked the investigation failed, kept the agent contained and did
-not run Qwen advisory analysis. Qwen's HTTP connection was independently verified;
-24 demo audit events reached ClickHouse with pending outbox count zero. No valid
-worker report or successful runtime fix is claimed. Do not retry uncertain creation
-automatically or resume a contained agent from task status.
+The historical Goose `v1.0.5` demo failed on a missing worker and final frozen-hash
+mismatch despite matching setup source; the app kept containment and skipped advisory
+analysis. Its runtime destruction was verified. Separately, Qwen HTTP connectivity and
+24 demo ClickHouse events were verified with pending outbox count zero.
+
+The replacement committed Python agent is published and its narrowly mediated Qwen
+operation returned HTTP `200`. A Python probe reached `DONE`, but the Guild driver
+dropped its `AIMessage`. Direct `console_log` report delivery, exact root binding and
+cleanup are still awaiting verification. No completed end-to-end v2 RCA is claimed.
+Do not retry uncertain creation automatically or resume a contained agent from task status.
 See [Guild API triggers](https://docs.guild.ai/platform/api-triggers).
 
 ### Slack MCP
@@ -446,6 +428,19 @@ Incident detail separates frozen input/policy from actual sandbox observations,
 Qwen hypotheses, Guild results, and operator resolution. The console refreshes
 automatically without treating stale data as a current healthy state.
 
+The live scripted demo makes a real Qwen completion using a separate fixed
+compromised-agent profile, a synthetic marker and `attacker.invalid` canary
+destination. It is intentional scripted behavior, not a discovered vulnerability.
+Normal policy enforcement contains forbidden proposals and queues investigation;
+refusal or inference failure never fabricates a blocked action. The original
+effective checkpoint and its fixed profile are preserved across source controls.
+
+Briefs also receives clearly labeled `investigation_report` artifacts after a
+bound protocol-2 report, terminal root and verified runtime cleanup. Partial reports
+disclose failures; all-error receipts publish an explicitly incomplete status report
+with zero successful reruns and no established root cause. Reports summarize evidence and advisory hypotheses, never publish
+the blocked proposal or imply verified isolation, established RCA or safe recovery.
+
 Connections provides explicit readiness checks for inference, ClickHouse, Guild,
 hosted investigation isolation and Slack MCP. Credentials are never entered into frontend
 state or exposed through health responses. Retain Memory and legacy Incidents
@@ -462,6 +457,7 @@ do not add a marketing landing page.
 | `POST /api/operations/agents/{id}/run` | Queue one task under the normal policy/lease. |
 | `POST /api/operations/agents/{id}/pause` or `/resume` | Explicit operator control; unresolved incidents prevent resumption. |
 | `POST /api/operations/demo` | Create a labeled controlled/recorded incident, not a fabricated live attack. |
+| `POST /api/operations/demo/live` | Run the real-Qwen scripted canary scenario; contain forbidden proposals and automatically queue investigation. |
 | `GET /api/operations/incidents/{id}` | Immutable snapshot and investigation progress. |
 | `POST /api/operations/incidents/{id}/investigate` | Queue a bounded investigation. |
 | `POST /api/operations/incidents/{id}/resolve` | Record operator resolution; no automatic resume. |
@@ -524,9 +520,10 @@ Sponsor-specific credential names retain their provider prefixes.
   and support for optional thinking/JSON Schema parameters.
 - ClickHouse: dedicated host, port, database, TLS setting and credentials. Initialize
   the bundled schema explicitly before expecting sponsor analytics.
-- Guild: account key, dedicated private workspace, published installed investigator,
-  reviewed environment and supported investigator model/provider. No production
-  integrations or application-control authority. Local Docker is not required.
+- Guild: account key, dedicated private workspace, pinned committed Python investigator,
+  exact shared contract, restricted mediated Qwen operation and sole public-demo marker
+  association. No custom environment, publishing or application-control authority.
+  Local Docker is not required; legacy Goose setup is separate.
 - Slack: backend-owned user access token from an eligible registered app, approved
   channel/workspace, discovered send tool and pinned schema hash; explicitly enable
   delivery only after confirming permissions and tool arguments.
@@ -539,7 +536,8 @@ Acceptance must distinguish implemented adapters from successful live connectivi
 3. A forbidden action is denied and the agent remains contained across restart.
 4. Snapshot inspection reveals exact inputs, policy and observed action evidence.
 5. With Guild provisioned, an exact terminal root produces an incident/hash-bound
-   report. Exclusive isolation requires separate matching runtime evidence; missing
+   report and cleanup is confirmed through runtime API readback. Exclusive isolation
+   requires separate matching runtime evidence; missing
    attestation keeps the job `review_required`, not indefinitely pending or verified.
 6. Qwen/Guild hypotheses reference supplied evidence and cannot resume the agent.
 7. Real ClickHouse exports/queries and hosted Guild sessions demonstrate substantive

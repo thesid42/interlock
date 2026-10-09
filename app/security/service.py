@@ -6,7 +6,8 @@ from threading import Lock
 
 from app.core.service import new_id, now
 from app.integrations.common import IntegrationUnavailable
-from . import model
+from . import model, rca_contract
+from .rca_contract import policy_violation
 from .sources import DEFAULT_HOSTS, collect, suspicious_instruction, validate_url
 from .store import decode, encode, initialize
 from .worker import InvestigationWorker
@@ -25,6 +26,9 @@ class SecurityOperations(InvestigationWorker):
         self._last_export = ""
         self.allowed_hosts = tuple(getattr(settings, "security_source_hosts", DEFAULT_HOSTS))
         initialize(self.store)
+        with self.store.transaction() as db:
+            if "checkpoint_json" not in {row[1] for row in db.execute("PRAGMA table_info(security_runs)")}:
+                db.execute("ALTER TABLE security_runs ADD COLUMN checkpoint_json TEXT")
 
     def readiness(self):
         guild_client = getattr(self.sandbox, "guild", None) or self.guild
@@ -136,7 +140,7 @@ class SecurityOperations(InvestigationWorker):
         run_id, created = new_id("run"), now()
         db.execute("INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?,?)", (
             run_id, agent["namespace_id"], "research_brief", agent["agent_id"], "security_operations",
-            "full_system", "recorded" if mode != "live" else "live", created, None, "running"))
+            "full_system", "live" if mode in {"live", "live_scripted_demo"} else "recorded", created, None, "running"))
         db.execute("INSERT INTO security_runs(run_id,agent_id,state,mode,created_at) VALUES(?,?,?,?,?)", (run_id, agent["agent_id"], "queued", mode, created))
         self.core._event(db, "security_run_queued", self.core._run(db, run_id), run_purpose="security_operations", decision="queued")
         db.execute("UPDATE security_agents SET next_check_at=? WHERE agent_id=?", (later(agent["interval_seconds"]), agent["agent_id"]))
@@ -192,16 +196,11 @@ class SecurityOperations(InvestigationWorker):
                 "destination": "app", "allowed_source_hosts": list(self.allowed_hosts)}
 
     def _authorize(self, proposal, sources):
-        if proposal.get("action") not in {"publish_brief", "abstain"}:
-            return "S2", "Agent proposed a tool outside its authorized capabilities"
-        if proposal.get("destination") != "app":
-            return "S2", "Agent proposed a destination outside the fixed application sink"
-        if proposal["action"] == "publish_brief" and (not proposal.get("body", "").strip() or not proposal.get("title", "").strip() or not proposal.get("evidence_ids")):
-            return "S3", "Agent proposed publishing without a source-backed draft"
-        ids = {source["source_id"] for source in sources}
-        if any(item not in ids for item in proposal.get("evidence_ids", [])):
-            return "S3", "Agent proposal references evidence outside the authorized context"
-        return None
+        return policy_violation(proposal, {source["source_id"] for source in sources})
+
+    def _record_checkpoint(self, run_id, checkpoint):
+        with self.store.transaction() as db:
+            db.execute("UPDATE security_runs SET checkpoint_json=? WHERE run_id=?", (encode(checkpoint), run_id))
 
     def _contain(self, run_id, sources, proposal, rule, reason, mode="live", existing_incident=None, affected_ids=None):
         with self.store.transaction() as db:
@@ -227,11 +226,17 @@ class SecurityOperations(InvestigationWorker):
                 if source["source_id"] in affected_ids:
                     db.execute("UPDATE security_sources SET quarantined=1 WHERE source_id=?", (source["source_id"],))
             action = {"action_id": action_id, "tool": proposal.get("action", "unknown"), "arguments": proposal, "decision": "blocked", "reason": reason}
+            checkpoint = decode(db.execute("SELECT checkpoint_json FROM security_runs WHERE run_id=?", (run_id,)).fetchone()).get("checkpoint")
             snapshot = {"incident_id": incident_id, "agent_id": agent["agent_id"], "run_id": run_id,
                         "mode": mode, "mission": agent["mission"], "policy": self._policy(),
                         "sources": frozen_sources, "memories": memories, "proposed_action": proposal,
                         "actions": [action], "detected_at": now(), "rule": rule, "reason": reason,
+                        "effective_checkpoint": checkpoint,
+                        "checkpoint_fidelity": checkpoint.get("fidelity") if checkpoint else "reconstruction_not_exact",
+                        "affected_source_ids": [source["source_id"] for source in sources if source["source_id"] in affected_ids],
                         "evidence_ids": list(dict.fromkeys([incident_id, run_id, action_id] + [source["source_id"] for source in sources] + [memory["memory_id"] for memory in memories]))}
+            if mode == "live_scripted_demo":
+                snapshot["demo_scenario"] = "Real Qwen completion with deliberately scripted compromised-agent behavior; not a discovered vulnerability. Synthetic canary only; no external dispatch."
             db.execute("UPDATE security_agents SET state='contained',reason=? WHERE agent_id=?", (reason, agent["agent_id"]))
             db.execute("INSERT INTO security_incidents VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
                 incident_id, agent["agent_id"], run_id, "contained", rule, reason, mode,
@@ -313,7 +318,8 @@ class SecurityOperations(InvestigationWorker):
             context = self.core.capture_context(run_id, [source["memory_id"] for source in sources])
             with self.store.transaction() as db:
                 db.execute("UPDATE security_runs SET context_id=? WHERE run_id=?", (context["context_id"], run_id))
-            proposal, metadata = model.propose(self.inference, self.settings.agent_model, agent["mission"], sources, self._policy())
+            proposal, metadata = model.propose(self.inference, self.settings.agent_model, agent["mission"], sources, self._policy(),
+                                              checkpoint_callback=lambda checkpoint: self._record_checkpoint(run_id, checkpoint))
         except IntegrationUnavailable:
             self._finish(run_id, "unavailable", "Live evidence collected; configure the Akash-hosted Qwen endpoint and served model")
             return
@@ -344,6 +350,55 @@ class SecurityOperations(InvestigationWorker):
             db.execute("UPDATE security_runs SET state='completed',finished_at=?,lease_until=NULL,error=? WHERE run_id=?", (now(), "; ".join(errors) or None, run_id))
             db.execute("UPDATE runs SET outcome='completed',finished_at=? WHERE run_id=?", (now(), run_id))
             db.execute("UPDATE security_agents SET last_check_at=?,last_outcome='completed' WHERE agent_id=?", (now(), agent["agent_id"]))
+
+    def create_live_demo(self):
+        """One real completion under an explicit synthetic compromised-agent profile."""
+        agent_id, created = new_id("agent"), now()
+        label = "Live scripted Qwen canary demo; not a discovered vulnerability"
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO security_agents VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (
+                agent_id, "Scripted Qwen attack simulation", rca_contract.PUBLIC_MISSION,
+                "[]", 900, "paused", label, new_id("ns"), created, later(86400), None, None))
+            job = self._queue(db, self._agent(db, agent_id), "live_scripted_demo")
+            db.execute("UPDATE security_runs SET state='running',started_at=?,lease_until=? WHERE run_id=?", (created, later(600), job["run_id"]))
+            self.core._event(db, "security_scripted_demo_started", self.core._run(db, job["run_id"]),
+                             decision="synthetic_real_inference", reason=label, run_purpose="security_operations")
+        agent = self.get_agent(agent_id)
+        try:
+            content = rca_contract.SCRIPTED_DEMO_SOURCE
+            source = self._record_source(agent, job["run_id"], {
+                "url": rca_contract.SCRIPTED_DEMO_URL, "content": content,
+                "content_hash": hashlib.sha256(content.encode()).hexdigest(), "truncated": False})
+            if source is None:
+                raise ValueError("Synthetic source is unavailable")
+            self.core.retrieve_memories(job["run_id"], [source["memory_id"]])
+            context = self.core.capture_context(job["run_id"], [source["memory_id"]])
+            with self.store.transaction() as db:
+                db.execute("UPDATE security_runs SET context_id=? WHERE run_id=?", (context["context_id"], job["run_id"]))
+            proposal, metadata = model.propose(
+                self.inference, self.settings.agent_model, rca_contract.PUBLIC_MISSION,
+                [source], self._policy(), profile=rca_contract.SCRIPTED_DEMO_PROFILE,
+                checkpoint_callback=lambda checkpoint: self._record_checkpoint(job["run_id"], checkpoint))
+        except Exception as exc:
+            state = "unavailable" if isinstance(exc, IntegrationUnavailable) else "failed"
+            error = f"Scripted Qwen demo did not produce a valid proposal: {type(exc).__name__}. No attack result was fabricated."
+            self._finish(job["run_id"], state, error)
+            return {"agent": self.get_agent(agent_id), "incident": None, "error": error, "state": state}
+        with self.store.transaction() as db:
+            db.execute("UPDATE security_runs SET proposal_json=? WHERE run_id=?", (encode(proposal), job["run_id"]))
+            self.core._event(db, "security_scripted_demo_proposal", self.core._run(db, job["run_id"]),
+                             decision="model_returned", reason=label, run_purpose="security_operations", **metadata)
+        violation = self._authorize(proposal, [source])
+        if violation:
+            reason = "Scripted real-Qwen canary proposal blocked before dispatch; intentionally simulated compromise, not a discovered vulnerability. " + violation[1]
+            incident_id = self._contain(job["run_id"], [source], proposal, violation[0], reason,
+                                        "live_scripted_demo", affected_ids=[source["source_id"]])
+            self._finish(job["run_id"], "blocked", reason)
+            return {"agent": self.get_agent(agent_id), "incident": self.get_incident(incident_id),
+                    "state": "blocked", "message": "Real Qwen proposal contained; sandbox investigation automatically queued. Synthetic data only."}
+        self._finish(job["run_id"], "completed")
+        return {"agent": self.get_agent(agent_id), "incident": None, "state": "completed",
+                "message": "Qwen returned a policy-allowed proposal or abstained. The scripted attack was not reproduced; no incident or external action was fabricated."}
 
     def create_demo(self):
         agent_id, created = new_id("agent"), now()

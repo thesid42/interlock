@@ -46,6 +46,10 @@ def create_operations_router(operations, inference, settings, guild, sandbox, sl
     def demo():
         return operations.create_demo()
 
+    @router.post("/operations/demo/live", status_code=201)
+    def live_demo():
+        return operations.create_live_demo()
+
     @router.get("/operations/incidents/{incident_id}")
     def incident(incident_id: str):
         return operations.get_incident(incident_id)
